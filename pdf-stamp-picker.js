@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.4';
+  var VERSION = '4.7.5';
 
   /* ====================== 常量 ====================== */
 
@@ -75,7 +75,7 @@
     '.psp-toolbar select{background:#3a3f47;color:#e8eaed;border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:5px 8px;font-size:12px;cursor:pointer;max-width:130px;font-family:inherit;transition:border-color .18s ease}',
     '.psp-toolbar select:hover{border-color:rgba(255,255,255,.3)}',
     '.psp-toolbar .psp-sep{width:1px;height:20px;background:rgba(255,255,255,.14);margin:0 5px;flex:none}',
-    '.psp-toolbar .psp-pageinfo{margin-left:auto;opacity:.9;font-variant-numeric:tabular-nums;background:rgba(0,0,0,.28);border-radius:14px;padding:3px 12px;font-size:11.5px;color:#b8bcc4;border:1px solid rgba(255,255,255,.08)}',
+    '.psp-toolbar .psp-pageinfo{opacity:.9;font-variant-numeric:tabular-nums;background:rgba(0,0,0,.28);border-radius:14px;padding:3px 12px;font-size:11.5px;color:#b8bcc4;border:1px solid rgba(255,255,255,.08)}',
     '.psp-toolbar .psp-zoomval{min-width:50px;text-align:center;font-variant-numeric:tabular-nums;color:#b8bcc4;font-size:11.5px}',
     '.psp-toolbar .psp-thumb{width:30px;height:30px;border-radius:8px;object-fit:contain;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);padding:3px;cursor:default;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .2s ease}',
     '.psp-toolbar .psp-thumb:hover{transform:scale(1.08)}',
