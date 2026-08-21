@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.4.3';
+  var VERSION = '4.5.0';
 
   /* ====================== 常量 ====================== */
 
@@ -288,7 +288,8 @@
       stampSize: 120,
       minStampSize: 24,
       maxStampSize: 480,
-      pdfjsUrl: CDN_PDFJS
+      pdfjsUrl: CDN_PDFJS,
+      cMapUrl: undefined   // 中文 PDF 的 CMap 目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
     }, options || {});
     if (options && options.pdfjs) this._options.pdfjs = options.pdfjs;
 
@@ -576,12 +577,20 @@
     opts = opts || {};
     var p;
 
+    // 中止上一次未完成的加载（切换文档时）
+    if (this._abortCtrl) { try { this._abortCtrl.abort(); } catch (e) { /* ignore */ } }
+    this._abortCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    this._abortSignal = opts.signal || (this._abortCtrl ? this._abortCtrl.signal : undefined);
+    // 释放旧文档（防内存累积）
+    if (this._pdf && this._pdf.destroy) { try { this._pdf.destroy(); } catch (e) { /* ignore */ } }
+    this._pdf = null;
+
     if (isPdfjsProxy(source)) {
       p = Promise.resolve(source);
     } else if (typeof source === 'string') {
-      p = this._loadRemote({ url: source });
+      p = this._loadRemote({ url: source, signal: this._abortSignal });
     } else if (source && typeof source === 'object' && typeof source.url === 'string' && !(source instanceof ArrayBuffer)) {
-      p = this._loadRemote(source);
+      p = this._loadRemote(Object.assign({}, source, { signal: this._abortSignal }));
     } else if (typeof File !== 'undefined' && source instanceof File) {
       this._docName = source.name || '本地文件.pdf';
       p = source.arrayBuffer().then(function (buf) { return self._getDoc({ data: buf }); });
@@ -611,6 +620,8 @@
       self._setLoading(false);
     }).catch(function (err) {
       self._setLoading(false);
+      // 中止加载是预期行为（切换文档/销毁），不视为错误
+      if (err && (err.name === 'AbortError' || /已中止/.test(err.message || ''))) return;
       var msg = (err && err.message) || String(err);
       // pdf.js 不可用给出明确提示（可能是离线且本地 vendor 缺失）
       if (/pdf\.js|pdfjsLib/.test(msg) || /no pdfjsLib|load fail/.test(msg)) {
@@ -631,20 +642,39 @@
     var hasCustom = cfg.method && cfg.method.toUpperCase() !== 'GET';
     var hasHeaders = Object.keys(headers).length > 0;
     if (!hasCustom && !hasHeaders) {
-      // 纯静态地址 → pdf.js 原生流式加载（支持大文件、Range 请求）
+      // 纯静态地址 → pdf.js 原生流式加载（支持大文件、Range 请求、onProgress）
       return this._getDoc({ url: url });
     }
-    // 文件流接口 / 自定义头 → fetch 获取字节
+    // 文件流接口 / 自定义头 → fetch 流式取字节（带进度 + 可中止）
+    var signal = cfg.signal || this._abortSignal;
     return fetch(url, {
       method: cfg.method || 'GET',
       headers: headers,
-      body: cfg.body || undefined
+      body: cfg.body || undefined,
+      signal: signal
     }).then(function (res) {
       if (!res.ok) throw new Error('[PdfStampPicker] 加载 PDF 失败 HTTP ' + res.status + ' ' + res.statusText);
-      return res.arrayBuffer();
+      var total = parseInt(res.headers.get('Content-Length') || '0', 10) || 0;
+      var reader = res.body && res.body.getReader ? res.body.getReader() : null;
+      if (!reader) return res.arrayBuffer(); // 无流式支持时直接取
+      var chunks = [];
+      var received = 0;
+      var pump = function () {
+        return reader.read().then(function (r) {
+          if (r.done) return;
+          chunks.push(r.value);
+          received += r.value.length;
+          self._onLoadProgress(received, total);
+          return pump();
+        });
+      };
+      return pump().then(function () { return new Blob(chunks).arrayBuffer(); });
     }).then(function (buf) {
       return self._getDoc({ data: buf });
     }).catch(function (err) {
+      if (err && err.name === 'AbortError') {
+        throw new Error('[PdfStampPicker] 加载已中止');
+      }
       if (err && err.name === 'TypeError' && /fetch|network/i.test(String(err.message || ''))) {
         throw new Error('[PdfStampPicker] 网络请求失败，请检查 CORS 与地址可达性: ' + url);
       }
@@ -654,9 +684,56 @@
 
   PdfStampPicker.prototype._getDoc = function (pdfjsCfg) {
     var self = this;
+    var cfg = Object.assign({}, pdfjsCfg);
+    // 加载进度（pdf.js onProgress）
+    cfg.onProgress = function (p) {
+      self._onLoadProgress(p.loaded || 0, p.total || 0);
+    };
+    // 中止信号：外部 signal 或内部（destroy/换文档时 abort）
+    cfg.signal = pdfjsCfg.signal || this._abortSignal;
+    // CMap 本地化：中文 PDF 离线不乱码（显式配置 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
+    var cMapUrl = this._options.cMapUrl;
+    if (cMapUrl === undefined && this._detectedCMapUrl === undefined) {
+      // 首次加载：先探测本地 cMaps/（同步串接，不阻塞主流程太久）
+      var scriptSrc = (document.currentScript && document.currentScript.src) || null;
+      var cands = PdfStampPicker._localCandidates(window.location.href, scriptSrc);
+      var cMapCands = [];
+      cands.forEach(function (c) {
+        cMapCands.push(c.replace(/vendor\/pdf\.min\.js$/, 'cMaps/'));
+        cMapCands.push(c.replace(/vendor\/pdf\.min\.js$/, 'vendor/cMaps/'));
+      });
+      var idx = 0;
+      this._detectedCMapUrl = null;
+      var probe = function () {
+        if (idx >= cMapCands.length) return Promise.resolve();
+        var src = cMapCands[idx++];
+        return fetch(src + 'greek.bcmap', { method: 'HEAD' }).then(function (res) {
+          if (res.ok) { self._detectedCMapUrl = src; }
+          else throw new Error('no');
+        }).catch(probe);
+      };
+      return probe().then(function () {
+        var u = self._options.cMapUrl || self._detectedCMapUrl || null;
+        if (u) { cfg.cMapUrl = u; cfg.cMapPacked = true; }
+        return self._ensurePdfjs().then(function (pdfjs) {
+          return pdfjs.getDocument(cfg).promise;
+        });
+      });
+    }
+    if (cMapUrl || this._detectedCMapUrl) {
+      cfg.cMapUrl = cMapUrl || this._detectedCMapUrl;
+      cfg.cMapPacked = true; // .bcmap 压缩格式
+    }
     return this._ensurePdfjs().then(function (pdfjs) {
-      return pdfjs.getDocument(pdfjsCfg).promise;
+      return pdfjs.getDocument(cfg).promise;
     });
+  };
+
+  /** 加载进度回调（显示百分比） */
+  PdfStampPicker.prototype._onLoadProgress = function (loaded, total) {
+    if (!total) { this._setLoading(true, 'PDF 加载中…'); return; }
+    var pct = Math.min(100, Math.round(loaded / total * 100));
+    this._setLoading(true, 'PDF 加载中… ' + pct + '%');
   };
 
   /** 确保 pdfjsLib 可用（优先级：传入实例 > 全局 > 配置URL > 本地探测 > CDN） */
@@ -895,12 +972,26 @@
   PdfStampPicker.prototype._renderPage = function () {
     var self = this;
     if (this._pdfMode !== 'pdfjs' || !this._page) return Promise.resolve();
+    // 取消未完成的旧渲染任务（翻页/缩放时防资源浪费与旧画面残留）
+    if (this._renderTask) {
+      try { this._renderTask.cancel(); } catch (e) { /* ignore */ }
+      this._renderTask = null;
+    }
     var dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
     var renderScale = this._cssScale * Math.max(1, dpr);
     var viewport = this._page.getViewport({ scale: renderScale });
     this._canvas.width = Math.round(viewport.width);
     this._canvas.height = Math.round(viewport.height);
-    return this._page.render({ canvasContext: this._canvas.getContext('2d'), viewport: viewport }).promise;
+    var task = this._page.render({ canvasContext: this._canvas.getContext('2d'), viewport: viewport });
+    this._renderTask = task;
+    return task.promise.then(function () {
+      if (self._renderTask === task) self._renderTask = null;
+    }).catch(function (err) {
+      // 渲染被取消是预期行为（翻页/缩放/销毁），不视为错误
+      if (self._renderTask === task) self._renderTask = null;
+      if (err && err.name === 'RenderingCancelledException') return;
+      throw err;
+    });
   };
 
   PdfStampPicker.prototype.setZoom = function (z) {
@@ -2264,6 +2355,13 @@
     if (this._raf) cancelAnimationFrame(this._raf);
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
     if (!this._ro) window.removeEventListener('resize', this._handlers.resize);
+    // 取消未完成的渲染任务
+    if (this._renderTask) { try { this._renderTask.cancel(); } catch (e) { /* ignore */ } this._renderTask = null; }
+    // 中止未完成的加载
+    if (this._abortCtrl) { try { this._abortCtrl.abort(); } catch (e) { /* ignore */ } this._abortCtrl = null; }
+    // 释放 pdf.js 文档资源
+    if (this._pdf && this._pdf.destroy) { try { this._pdf.destroy(); } catch (e) { /* ignore */ } }
+    this._pdf = null;
     this._ptrs = null;
     this._pinch = null;
     if (this._root && this._root.parentNode) this._root.parentNode.removeChild(this._root);

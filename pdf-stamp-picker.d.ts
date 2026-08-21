@@ -52,6 +52,8 @@ export interface PdfStampPickerOptions {
   maxStampSize?: number;
   /** pdf.js 自动加载地址（默认 CDN，可不配） */
   pdfjsUrl?: string;
+  /** 中文 PDF 字体映射目录（显式指定 > 自动探测本地 cMaps/ > 默认 CDN） */
+  cMapUrl?: string;
   /** 已有 pdfjsLib 实例（可选，避免重复加载） */
   pdfjs?: unknown;
 }
@@ -143,7 +145,7 @@ export default class PdfStampPicker {
   static version: string;
 
   /** 统一加载：File / ArrayBuffer / URL / 流接口配置 / pdfjs proxy */
-  load(source: PdfSource, opts?: { pageNumber?: number; mode?: PickerMode }): Promise<void>;
+  load(source: PdfSource, opts?: { pageNumber?: number; mode?: PickerMode; signal?: AbortSignal }): Promise<void>;
   /** 兼容 v1 的 PDF.js 集成模式 */
   loadPDF(source: PdfSource, opts?: { pageNumber?: number }): Promise<void>;
   /** 纯画布模式 */

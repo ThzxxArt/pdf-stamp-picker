@@ -36,7 +36,7 @@ v4.3 特性：**精致 UI（图标工具栏/卡片列表/序号角标/toast）**
 
 > 库会自动注入全部 HTML/CSS、自动加载 pdf.js、自动生成**内置红色公章**（公章上的名字 = 当前用户名，切换用户自动更新）。宿主零样式代码。
 
-### pdf.js 加载策略（v4.2 起自动探测）
+### pdf.js 加载策略（v4.5 起）
 
 加载优先级：**传入 `pdfjs` 实例 > 全局 `window.pdfjsLib` > 配置 `pdfjsUrl` > 自动探测本地 > CDN 兜底**。
 
@@ -45,6 +45,19 @@ v4.3 特性：**精致 UI（图标工具栏/卡片列表/序号角标/toast）**
 2. 宿主页面同目录 `vendor/pdf.min.js` / `../vendor/pdf.min.js` / `libs/pdf.min.js`
 
 全部找不到才回退 CDN（cdnjs）。所以项目里只要把 `pdf-stamp-picker.js` 和 `vendor/` 放一起，**离线/内网环境零配置可用**。worker 自动按 `pdf.min.js → pdf.worker.min.js` 规则推断。
+
+**中文 PDF 离线不乱码（CMap 本地化）**：中文合同 PDF 常用 GBK/UniGB 字体映射，pdf.js 默认从 CDN 拉取。库会**自动探测本地 `cMaps/` 目录**（库同目录或页面目录，放 pdf.js 官方 `cmaps/` 解压内容），找到即本地加载；也可显式配置：
+
+```js
+const picker = new PdfStampPicker('#stage', {
+  cMapUrl: '/static/pdf/cMaps/'   // 显式指定（优先级高于自动探测）
+});
+```
+
+**加载进度与中止**：
+- 加载时显示真实百分比进度（`PDF 加载中… 45%`），流接口/静态 URL 均支持
+- `load(source, { signal })` 支持外部 AbortSignal 中止；切换文档/`destroy()` 自动中止旧加载
+- 翻页/缩放自动 cancel 未完成的渲染任务；`destroy()` 释放 pdf.js 文档资源（防内存累积）
 
 ## ✨ 签章模式（拖动公章放置）
 
@@ -262,6 +275,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | `stampSize` | `120` | 签章图显示基准宽度 px |
 | `minStampSize` / `maxStampSize` | `24` / `480` | 签章图缩放范围（Ctrl+滚轮） |
 | `pdfjsUrl` | 自动探测 | 显式指定 pdf.js 地址（默认自动探测本地 vendor → CDN 兜底） |
+| `cMapUrl` | 自动探测 | 中文 PDF 字体映射目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN） |
 | `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载，优先级最高） |
 
 ### 方法（实例 34 个，全部）
