@@ -72,22 +72,31 @@ const picker = new PdfStampPicker('#stage', {
 
 **公章名字跟随用户**：切到"乙方"再放置，公章自动变成"乙方"的名字（内置 canvas 动态生成，零外部资源）。放置后每个签章点快照自己的章图，切换用户不影响已放置的章。
 
-## 一键弹窗模式
+## 一键弹窗模式（最省事）
+
+**适用**：页面上放一个"去签章"按钮，点击弹出选择器，确认后拿 JSON——宿主不用写任何容器/样式/布局。
 
 ```js
 const json = await PdfStampPicker.openModal({
   source: 'https://api.example.com/pdf/contract/123',  // 或 File / ArrayBuffer / {url,headers}
-  title: '选择签章位置',
+  title: '设置各公司签章位置',
   users: [{ id: 'a', name: '甲方' }, { id: 'b', name: '乙方' }],
   width: 900,             // 弹窗宽度（数字=px，或 '90%' 字符串），默认 min(94vw,1180px)
   height: 700,            // 弹窗高度（数字=px，或 '70%'），默认 min(90vh,820px)
-  mode: 'stamp',          // 弹窗坐标选择模式（point/rect/stamp），等价 pickerOptions.mode
-  requireStamp: true,     // 必须有签章点才能确认
+  mode: 'stamp',          // 弹窗坐标选择模式（默认 stamp 签章 / point / rect）
+  requireStamp: true,     // 必须有签章点才能确认（无签章点会 toast 提示）
 });
-// json → { document: {...}, users: [{user, stamps}] }，取消 → null
+if (json) {
+  // json.users[].stamps[] → 对接第三方签章接口
+  await submitToEsign(json);
+} else {
+  // 用户点了取消
+}
 ```
 
-`openModal` 全部参数：`source` `title` `users` `currentUser` **`width` `height`（弹窗尺寸）** **`mode`（选择模式）** `confirmText` `cancelText` `requireStamp` `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（透传给选择器）。
+**弹窗交互**：点击遮罩 / ✕ / 取消按钮 → resolve null；确认 → resolve toJSON()。`onConfirm(json)` 可返回 Promise 阻止关闭（如先提交到后端再关）。
+
+完整参数：`source` `title` `users` `currentUser` `width` `height` `mode` `confirmText` `cancelText` `requireStamp` `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（透传给选择器）。
 
 ## 坐标选择模式的可选性加载
 
@@ -282,7 +291,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 
 | option | 默认 | 说明 |
 |---|---|---|
-| `mode` | `'rect'` | 初始模式：`'point'` 点选 / `'rect'` 框选 / `'stamp'` 拖放签章图 |
+| `mode` | `'stamp'` | 初始模式：`'stamp'` 签章（默认）/ `'point'` 点选 / `'rect'` 框选 |
 | `zoom` | `'fit-width'` | 初始缩放：数字(1pt→N px) / `'fit-width'` 适应宽度 / `'fit-page'` 适应整页 |
 | `aspectRatio` | `null` | 框选模式选区固定宽高比（w/h） |
 | `minSize` | `4` | 选区最小尺寸(屏幕px) |
@@ -372,7 +381,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 
 ## 交互
 
-- **签章模式**：点击即放置（完整落定）；拖动微调（拖动中半透明）；**章固定大小不可缩放**（无手柄/Ctrl+滚轮/双指均不缩放章）；点击选中；**不越界**；滚轮=页面滚动
+- **签章模式（默认）**：点击即放置（完整落定）；拖动微调（拖动中半透明）；**章固定大小不可缩放**（无手柄/Ctrl+滚轮/双指均不缩放章）；点击选中；**不越界**；滚轮=页面滚动
 - **框选**：拖动绘制矩形；`Shift` 锁正方形；完成后自动加入签章列表
 - **点选**：单击放置锚点（双环+准星样式），可拖动移动
 - **多签章**：点击已有签章点切换选中（带手柄），拖拽移动、8 向手柄缩放；每个签章点有**序号角标**

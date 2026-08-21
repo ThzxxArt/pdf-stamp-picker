@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.6.0';
+  var VERSION = '4.6.1';
 
   /* ====================== 常量 ====================== */
 
@@ -272,7 +272,7 @@
     if (!container) throw new Error('[PdfStampPicker] 需要传入容器元素或选择器');
 
     this._options = Object.assign({
-      mode: 'rect',
+      mode: 'stamp',
       zoom: 'fit-width',
       aspectRatio: null,
       minSize: 4,
@@ -2533,11 +2533,14 @@
       document.body.appendChild(mask);
 
       var settled = false;
-      var picker = new PdfStampPicker(body, Object.assign({}, config.pickerOptions, {
+      var pickerOpts = Object.assign({}, config.pickerOptions, {
         users: config.users,
-        currentUser: config.currentUser,
-        mode: config.mode !== undefined ? config.mode : (config.pickerOptions && config.pickerOptions.mode)
-      }));
+        currentUser: config.currentUser
+      });
+      // 顶层 mode 优先，其次 pickerOptions.mode，都不传则用构造默认（stamp）
+      if (config.mode !== undefined) pickerOpts.mode = config.mode;
+      else if (config.pickerOptions && config.pickerOptions.mode !== undefined) pickerOpts.mode = config.pickerOptions.mode;
+      var picker = new PdfStampPicker(body, pickerOpts);
       if (config.source) {
         picker.load(config.source).catch(function (err) {
           picker._emit('error', { message: err.message });
