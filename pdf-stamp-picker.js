@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v2.0.0
+ * PdfStampPicker v4.3.1
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.3.0';
+  var VERSION = '4.3.1';
 
   /* ====================== 常量 ====================== */
 
@@ -112,8 +112,31 @@
     '.psp-item:hover .psp-del{opacity:1}',
     '.psp-del:hover{background:rgba(234,67,53,.12);color:#ea4335}',
     /* ===== 主题 ===== */
-    '.psp-root.psp-dark{--psp-bg:#e8eaed}',
-    '.psp-root.psp-light{--psp-bg:#e8eaed}',
+    '.psp-root{--psp-bg:#e8eaed;--psp-tb:#2b2f36;--psp-tb-fg:#e8eaed;--psp-list-bg:#f4f5f7;--psp-list-fg:#202124}',
+    '.psp-root.psp-dark{--psp-bg:#525659;--psp-tb:#2b2f36;--psp-tb-fg:#e8eaed;--psp-list-bg:#2b2f36;--psp-list-fg:#e8eaed}',
+    '.psp-root.psp-light{--psp-bg:#e8eaed;--psp-tb:#ffffff;--psp-tb-fg:#3c4043;--psp-list-bg:#f4f5f7;--psp-list-fg:#202124}',
+    '.psp-scroll{background:var(--psp-bg)}',
+    '.psp-toolbar{background:var(--psp-tb);color:var(--psp-tb-fg);border-bottom:1px solid rgba(0,0,0,.12)}',
+    '.psp-toolbar button{color:var(--psp-tb-fg);border-color:rgba(128,134,139,.35);background:rgba(128,134,139,.08)}',
+    '.psp-toolbar button:hover{background:rgba(128,134,139,.18)}',
+    '.psp-toolbar select{background:var(--psp-tb);color:var(--psp-tb-fg);border-color:rgba(128,134,139,.35)}',
+    '.psp-toolbar .psp-sep{background:rgba(128,134,139,.3)}',
+    '.psp-toolbar .psp-pageinfo{color:var(--psp-tb-fg);opacity:.85;background:rgba(128,134,139,.15);border-color:rgba(128,134,139,.2)}',
+    '.psp-toolbar .psp-zoomval{color:var(--psp-tb-fg);opacity:.85}',
+    '.psp-toolbar .psp-thumb{background:rgba(128,134,139,.12);border-color:rgba(128,134,139,.25)}',
+    '.psp-toolbar .psp-thumb-label{color:var(--psp-tb-fg);opacity:.65}',
+    '.psp-light .psp-toolbar button.active{background:linear-gradient(180deg,#5a95f5,#4285f4);color:#fff;border-color:transparent}',
+    '.psp-list{background:var(--psp-list-bg);color:var(--psp-list-fg);border-left:1px solid rgba(128,134,139,.2)}',
+    '.psp-list h3{color:var(--psp-list-fg);opacity:.7}',
+    '.psp-group-head{color:var(--psp-list-fg);opacity:.8}',
+    '.psp-item{background:rgba(255,255,255,.06)}',
+    '.psp-root.psp-light .psp-item{background:#fff;box-shadow:0 1px 2px rgba(60,64,67,.08)}',
+    '.psp-root.psp-dark .psp-item{background:rgba(255,255,255,.07)}',
+    '.psp-root.psp-dark .psp-item-sub{color:#9aa0a6}',
+    '.psp-root.psp-dark .psp-list-empty{color:#9aa0a6}',
+    '.psp-root.psp-dark .psp-del{color:#9aa0a6}',
+    '.psp-urlbar{background:var(--psp-tb);border-bottom:1px solid rgba(128,134,139,.15)}',
+    '.psp-urlbar input{background:rgba(128,134,139,.15);color:var(--psp-tb-fg);border-color:rgba(128,134,139,.3)}',
     /* ===== 弹窗 ===== */
     '.psp-modal-mask{position:fixed;inset:0;background:rgba(32,33,36,.6);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:99990;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;animation:pspFadeIn .22s ease}',
     '.psp-modal{display:flex;flex-direction:column;width:min(94vw,1180px);height:min(90vh,820px);background:#f4f5f7;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.24),0 24px 80px rgba(0,0,0,.4);animation:pspModalIn .28s cubic-bezier(.2,.9,.3,1.2)}',
@@ -294,7 +317,6 @@
     this._raf = 0;
     this._destroyed = false;
     this._stampImg = null;   // {src, name, w, h, el(Image)}
-    this._hover = null;      // stamp 模式跟随鼠标的预览 {x,y,w,h}
 
     injectStyles();
     this._buildDOM();
@@ -775,8 +797,10 @@
       self._offsetX = view[0];
       self._offsetY = view[1];
       self._rotation = normalizeRotation(page.rotate || 0);
-      self._sel = null;
-      self._activeId = null;
+      if (!self._options.keepSelectionOnPageChange) {
+        self._sel = null;
+        self._activeId = null;
+      }
       self._layoutPage();
       return self._renderPage().then(function () {
         self._updateToolbar();
@@ -1836,31 +1860,23 @@
     ctx.stroke();
   };
 
-  /** 签章图片缓存（按 src），加载完成后自动重绘 */
+  /** 签章图片缓存（按 src），上限 60 张防内存膨胀，超出清理最旧 */
   PdfStampPicker.prototype._imgFor = function (src) {
     if (!this._imgCache) this._imgCache = {};
     if (this._imgCache[src]) return this._imgCache[src];
+    var keys = Object.keys(this._imgCache);
+    if (keys.length >= 60) {
+      // 清理最旧的一半（dataURL 章图通常小，60 张足够）
+      for (var i = 0; i < Math.floor(keys.length / 2); i++) {
+        delete this._imgCache[keys[i]];
+      }
+    }
     var img = new Image();
     var self = this;
     img.onload = function () { if (!self._destroyed) self._schedulePaint(); };
     img.src = src;
     this._imgCache[src] = img;
     return img;
-  };
-
-  /** 绘制签章图片到矩形（保持比例铺满，矩形已按源图比例锁定） */
-  PdfStampPicker.prototype._drawStampImage = function (ctx, rect, color, alpha) {
-    var img = this._stampImg;
-    if (!img || !img.el) return;
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.drawImage(img.el, rect.x, rect.y, rect.w, rect.h);
-    ctx.restore();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([5, 4]);
-    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
-    ctx.setLineDash([]);
   };
 
   /** 绘制全部签章点（非活动：显示该签章点自己的公章图/占位 + 序号角标） */
@@ -2249,11 +2265,6 @@
   }
 
   /** 构建完整 JSON（纯函数，可单测） */
-    /**
-   * 构建 JSON：以用户（签署方）为主维度分组。
-   * 每个用户下挂自己的签章点坐标 —— 直接对接第三方签章接口的 signers[].signAreas[] 模型。
-   * @returns {{document:Object, users:Array<{user:Object, stamps:Array}>}}
-   */
   function buildJSON(doc, stamps, users) {
     var userList = (users && users.length) ? users : [{ id: 'default', name: '默认', color: '#4285f4' }];
     var stampList = stamps || [];
