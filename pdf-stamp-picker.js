@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.6.1';
+  var VERSION = '4.6.2';
 
   /* ====================== 常量 ====================== */
 
@@ -2479,6 +2479,7 @@
    * 一键弹窗选择签章位置。
    * @param {Object} config
    * @param {*} config.source 统一 PDF 来源（File/URL/流接口配置/proxy）
+   * @param {Object} [config.json] 已有签章 JSON（toJSON()/toFlatJSON() 输出），打开后自动回显签章点与公章图
    * @param {string} [config.title='选择签章位置']
    * @param {string} [config.confirmText='确认']
    * @param {string} [config.cancelText='取消']
@@ -2537,16 +2538,30 @@
         users: config.users,
         currentUser: config.currentUser
       });
+      // 传了 json 但没传 users → 用 json 里的签署方初始化（避免多余默认用户）
+      if ((!config.users || !config.users.length) && config.json && Array.isArray(config.json.users)) {
+        pickerOpts.users = config.json.users.map(function (g) { return g.user; });
+      }
       // 顶层 mode 优先，其次 pickerOptions.mode，都不传则用构造默认（stamp）
       if (config.mode !== undefined) pickerOpts.mode = config.mode;
       else if (config.pickerOptions && config.pickerOptions.mode !== undefined) pickerOpts.mode = config.pickerOptions.mode;
       var picker = new PdfStampPicker(body, pickerOpts);
-      if (config.source) {
-        picker.load(config.source).catch(function (err) {
-          picker._emit('error', { message: err.message });
-          if (typeof console !== 'undefined') console.error(err);
+      // PDF 加载 → （可选）回显已有签章点 JSON → 完成
+      var loadPromise = config.source
+        ? picker.load(config.source)
+        : Promise.resolve();
+      if (config.json) {
+        loadPromise = loadPromise.then(function () {
+          return picker.importJSON(config.json).catch(function (err) {
+            picker._emit('error', { message: 'JSON 回显失败：' + (err && err.message || err) });
+            if (typeof console !== 'undefined') console.error(err);
+          });
         });
       }
+      loadPromise.catch(function (err) {
+        picker._emit('error', { message: err.message });
+        if (typeof console !== 'undefined') console.error(err);
+      });
 
       function finish(result) {
         if (settled) return;

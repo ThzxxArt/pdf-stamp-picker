@@ -120,6 +120,8 @@ export interface FlatPickerJSON {
 export interface OpenModalConfig extends Partial<PdfStampPickerOptions> {
   /** PDF 来源（统一入口） */
   source?: PdfSource;
+  /** 已有签章 JSON（toJSON()/toFlatJSON() 输出），打开后自动回显签章点与公章图 */
+  json?: PickerJSON | FlatPickerJSON;
   /** 弹窗标题 */
   title?: string;
   /** 弹窗宽度：数字=px 或 CSS 值（如 '90%'） */

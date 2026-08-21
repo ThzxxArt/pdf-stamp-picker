@@ -94,9 +94,23 @@ if (json) {
 }
 ```
 
+**弹窗回显已有签章（传 JSON）**：打开弹窗时传入之前导出的 JSON（`toJSON()`/`toFlatJSON()` 输出），自动回显全部签章点与公章图，可继续编辑后确认：
+
+```js
+const json = await PdfStampPicker.openModal({
+  source: 'https://api.example.com/pdf/123',
+  json: savedJson,        // ★ 已有签章 JSON（回显签章点/公章图/签署方）
+  requireStamp: true
+});
+// 确认返回：savedJson 的签章 + 弹窗内新加的，全部合并
+```
+
+- `json` 与 `source` 配合：先加载 PDF → 自动回显 → 用户可继续加/改 → 确认拿全量 JSON
+- 未传 `users` 时自动用 json 里的签署方（不产生多余默认用户）
+
 **弹窗交互**：点击遮罩 / ✕ / 取消按钮 → resolve null；确认 → resolve toJSON()。`onConfirm(json)` 可返回 Promise 阻止关闭（如先提交到后端再关）。
 
-完整参数：`source` `title` `users` `currentUser` `width` `height` `mode` `confirmText` `cancelText` `requireStamp` `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（透传给选择器）。
+完整参数：`source` `json`（回显已有签章） `title` `users` `currentUser` `width` `height` `mode` `confirmText` `cancelText` `requireStamp` `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（透传给选择器）。
 
 ## 坐标选择模式的可选性加载
 
