@@ -67,6 +67,7 @@
     </div>
     <div class="panel-title"><span class="icon">⚡</span> 快捷操作</div>
     <div class="ops">
+      <button id="btn-local">📁 本地上传</button>
       <button id="btn-json">📋 复制 JSON</button>
       <button id="btn-import">🔁 导入 JSON 回显</button>
       <button id="btn-clear">🗑 清空签章</button>
@@ -80,7 +81,7 @@
 </main>
 
 <script src="../vendor/pdf.min.js"></script>
-<script src="../pdf-stamp-picker.js"></script>
+<script src="../pdf-stamp-picker.js?v=4.7.2"></script>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = '../vendor/pdf.worker.min.js';
 
@@ -173,6 +174,11 @@ document.getElementById('new-user').addEventListener('keydown', e => {
     addUserByName(document.getElementById('new-user').value);
     document.getElementById('new-user').value = '';
   }
+});
+document.getElementById('btn-local').addEventListener('click', () => {
+  if (!picker) return;
+  picker._fileInput.click();
+  toast('请选择本地 PDF 文件…');
 });
 document.getElementById('btn-json').addEventListener('click', async () => {
   if (!picker) return;

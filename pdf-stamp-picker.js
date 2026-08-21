@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.1';
+  var VERSION = '4.7.2';
 
   /* ====================== 常量 ====================== */
 
@@ -370,10 +370,19 @@
     // 隐藏文件输入
     var fileInput = document.createElement('input');
     fileInput.type = 'file';
-    fileInput.accept = 'application/pdf,.pdf';
+    // accept 兼容：部分 Android WebView 只认 MIME 不认 .pdf 扩展名，放宽可选项（load 时校验类型）
+    fileInput.accept = 'application/pdf,application/x-pdf,application/octet-stream,.pdf,*.pdf';
     fileInput.style.display = 'none';
     fileInput.addEventListener('change', function () {
-      if (fileInput.files && fileInput.files[0]) self.load(fileInput.files[0]);
+      var f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      self.load(f).catch(function (err) {
+        // 加载失败给反馈（修复静默无反应）：toast + error 事件
+        var msg = (err && err.message) || String(err);
+        self._toast('❌ 文件加载失败：' + msg);
+        self._emit('error', { message: msg });
+        if (typeof console !== 'undefined') console.error(err);
+      });
       fileInput.value = '';
     });
     root.appendChild(fileInput);
@@ -593,6 +602,12 @@
       p = this._loadRemote(Object.assign({}, source, { signal: this._abortSignal }));
     } else if (typeof File !== 'undefined' && source instanceof File) {
       this._docName = source.name || '本地文件.pdf';
+      // 类型校验：明显非 PDF 的文件提前报错（避免 pdf.js 解析后报晦涩错误）
+      var ftype = (source.type || '').toLowerCase();
+      var fname = (source.name || '').toLowerCase();
+      if (ftype && ftype.indexOf('pdf') < 0 && ftype.indexOf('octet-stream') < 0 && !/\.pdf$/.test(fname)) {
+        return Promise.reject(new Error('不是有效的 PDF 文件：' + (source.name || '')));
+      }
       p = source.arrayBuffer().then(function (buf) { return self._getDoc({ data: buf }); });
     } else if (source instanceof ArrayBuffer || (typeof Uint8Array !== 'undefined' && source instanceof Uint8Array)) {
       p = this._getDoc({ data: source });
