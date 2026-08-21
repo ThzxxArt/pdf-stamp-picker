@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PdfStampPicker v2 — 多用户多签章坐标选择器 Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #202124; color: #e8eaed; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 10px 16px; background: #292a2d; border-bottom: 1px solid #3c4043; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 15px; font-weight: 600; }
+  header .tag { font-size: 11px; color: #9aa0a6; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button { border: 1px solid #5f6368; background: transparent; color: #e8eaed; border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+  .tabs button.active { background: #4285f4; border-color: #4285f4; }
+  .tabs button:hover:not(.active) { background: #35363a; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #stage { flex: 1; min-width: 0; position: relative; }
+  aside { width: 300px; border-left: 1px solid #3c4043; display: flex; flex-direction: column; min-height: 0; background: #292a2d; }
+  aside h2 { font-size: 12px; font-weight: 600; padding: 10px 12px 6px; color: #9aa0a6; }
+  #info { padding: 0 12px 6px; font-size: 11px; color: #8ab4f8; }
+  #output { flex: 1; overflow: auto; padding: 8px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; background: #1f2022; margin: 0 10px 10px; border-radius: 6px; border: 1px solid #3c4043; }
+  #output .dim { color: #9aa0a6; }
+  .actions { display: flex; gap: 8px; padding: 0 12px 10px; flex-wrap: wrap; }
+  .actions button { background: #3c4043; color: #e8eaed; border: none; border-radius: 6px; padding: 5px 10px; font-size: 11px; cursor: pointer; }
+  .actions button:hover { background: #4a4d51; }
+  .actions button.active { background: #4285f4; }
+  .actions button.primary { background: #34a853; }
+  .actions button.primary:hover { background: #3cb85f; }
+  .users { display: flex; gap: 6px; padding: 0 12px 8px; flex-wrap: wrap; }
+  .users button { border: 1px solid #5f6368; background: transparent; color: #e8eaed; border-radius: 16px; padding: 3px 12px; font-size: 11px; cursor: pointer; }
+  .users button.active { border-color: transparent; font-weight: 600; }
+  .users button .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  .badge { display: inline-block; background: #34a853; color: #fff; font-size: 10px; padding: 2px 8px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PdfStampPicker <span class="tag">v2.0.0 · 单文件零依赖</span></h1>
+  <nav class="tabs">
+    <button id="tab-container" class="active">容器模式（多用户/多签章）</button>
+    <button id="tab-modal">弹窗模式</button>
+  </nav>
+</header>
+<main>
+  <div id="stage"></div>
+  <aside>
+    <h2>用户切换 <span class="badge">新</span></h2>
+    <div class="users" id="users">
+      <button data-id="u1" class="active"><span class="dot" style="background:#4285f4"></span>甲方</button>
+      <button data-id="u2"><span class="dot" style="background:#ea4335"></span>乙方</button>
+      <button data-id="u3"><span class="dot" style="background:#34a853"></span>丙方</button>
+    </div>
+    <h2>实时 JSON 输出</h2>
+    <div id="info"></div>
+    <div id="output">等待操作…</div>
+    <div class="actions">
+      <button id="btn-stamp">签章模式（拖公章）</button>
+      <button id="btn-add">程序化加签章</button>
+      <button id="btn-json">复制 JSON</button>
+      <button id="btn-clear">清空</button>
+    </div>
+    <div style="padding:0 12px 10px;font-size:10.5px;color:#9aa0a6;line-height:1.6">
+      💡 签章模式：点击页面即放置签章点（按住可拖动位置），滚轮缩放，图片不能拖出页面边界。内置公章上的名字 = 当前用户（切换用户自动更新）。
+    </div>
+  </aside>
+</main>
+
+<script src="../vendor/pdf.min.js"></script>
+<script src="../pdf-stamp-picker.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = '../vendor/pdf.worker.min.js';
+
+const stage = document.getElementById('stage');
+const output = document.getElementById('output');
+const info = document.getElementById('info');
+
+const USERS = [
+  { id: 'u1', name: '甲方', color: '#4285f4' },
+  { id: 'u2', name: '乙方', color: '#ea4335' },
+  { id: 'u3', name: '丙方', color: '#34a853' }
+];
+
+let picker = null;
+
+function renderJSON() {
+  if (!picker) return;
+  const json = picker.toJSON();
+  output.textContent = JSON.stringify(json, null, 2);
+  info.textContent = `文档: ${json.document.name || '(未命名)'} · ${json.document.pages}页 · 签章点 ${json.stamps.length} 个`;
+  // 高亮当前用户
+  const cu = picker.getCurrentUser();
+  document.querySelectorAll('#users button').forEach(b => b.classList.toggle('active', b.dataset.id === cu.id));
+}
+
+function initContainerMode() {
+  stage.innerHTML = '';
+  picker = new PdfStampPicker(stage, {
+    mode: 'rect',
+    controls: true,
+    users: USERS,
+    currentUser: 'u1',
+    showGrid: false,
+    zoom: 'fit-width'
+  });
+  picker.on('stampadd', renderJSON);
+  picker.on('stampremove', renderJSON);
+  picker.on('stampchange', renderJSON);
+  picker.on('stampselect', renderJSON);
+  picker.on('clear', renderJSON);
+  picker.on('pagechange', renderJSON);
+  picker.on('error', e => { info.textContent = '加载失败: ' + e.message; console.error(e); });
+
+  // 远程静态地址加载（测试 PDF）
+  picker.load('test.pdf').then(() => {
+    renderJSON();
+    // 预生成当前用户（甲方）的内置公章
+    return picker._ensureStampImage();
+  }).then(() => {
+    info.textContent = '已加载 test.pdf · 切换用户后公章名字自动变化 · 签章模式拖动放置（不越界）';
+  }).catch(e => {
+    info.textContent = '加载失败: ' + e.message;
+    console.error(e);
+  });
+}
+
+// 用户切换
+document.getElementById('users').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn || !picker) return;
+  picker.setCurrentUser(btn.dataset.id);
+  document.querySelectorAll('#users button').forEach(b => b.classList.toggle('active', b === btn));
+  info.textContent = `当前签章用户: ${picker.getCurrentUser().name}`;
+});
+
+// 签章模式（拖动公章放置）
+document.getElementById('btn-stamp').addEventListener('click', e => {
+  if (!picker) return;
+  picker.setMode('stamp');
+  document.querySelectorAll('.actions button').forEach(b => b.classList.remove('active'));
+  e.target.classList.add('active');
+  info.textContent = '签章模式：点击放置签章点，按住拖动，滚轮缩放，公章名字=当前用户';
+});
+
+// 程序化添加
+document.getElementById('btn-add').addEventListener('click', () => {
+  if (!picker) return;
+  const stamp = picker.addStamp({ x: 100, y: 600, width: 150, height: 80, note: '程序化添加' });
+  info.textContent = `已添加签章点 ${stamp.id}（当前用户: ${picker.getCurrentUser().name}）`;
+  renderJSON();
+});
+
+// 复制 JSON
+document.getElementById('btn-json').addEventListener('click', async () => {
+  if (!picker) return;
+  await picker.copyJSON();
+  info.textContent = 'JSON 已复制到剪贴板 ✅';
+});
+
+// 清空
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (!picker) return;
+  picker.clear();
+  info.textContent = '已清空全部签章点';
+  renderJSON();
+});
+
+// ============ 弹窗模式 ============
+document.getElementById('tab-modal').addEventListener('click', () => {
+  if (document.getElementById('tab-modal').classList.contains('active')) return;
+  document.getElementById('tab-container').classList.remove('active');
+  document.getElementById('tab-modal').classList.add('active');
+
+  // 一键弹窗：确认后返回 JSON
+  PdfStampPicker.openModal({
+    source: 'test.pdf',   // 也支持 File / {url, headers} / ArrayBuffer
+    title: '选择签章位置（弹窗模式）',
+    users: USERS,
+    currentUser: 'u2',
+    confirmText: '确认签章',
+    cancelText: '取消',
+    requireStamp: true,   // 必须有签章点才能确认
+    pickerOptions: { controls: true, zoom: 'fit-width' },
+    onConfirm: json => { console.log('用户确认，签章点数量:', json.stamps.length); }
+  }).then(json => {
+    if (json) {
+      info.textContent = `弹窗确认：返回 ${json.stamps.length} 个签章点 JSON`;
+      output.textContent = JSON.stringify(json, null, 2);
+    } else {
+      info.textContent = '弹窗已取消';
+    }
+    document.getElementById('tab-container').classList.add('active');
+    document.getElementById('tab-modal').classList.remove('active');
+  });
+});
+
+initContainerMode();
+</script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Length 535 >>
+stream
+
+q
+0.85 0.87 0.92 rg
+0 0 595.28 841.89 re f
+0.1 0.1 0.1 RG 1 w
+0.5 0.5 595.28-1 841.89-1 re S
+BT /F1 20 Tf 0.15 0.3 0.55 rg 40 780 Td (PDF Stamp Position Picker - Demo Page 1) Tj ET
+BT /F1 10 Tf 0.3 0.3 0.3 rg 40 755 Td (A4 portrait. Draw a selection where a seal should be placed.) Tj ET
+0.9 0.95 1 rg 0.35 0.55 0.9 RG 1.2 w
+120 500 200 120 re B
+0.25 0.55 0.9 rg
+140 540 160 8 re f
+BT /F1 9 Tf 1 1 1 rg 150 542 Td (SEAL HERE) Tj ET
+0.75 0.55 0.35 RG
+360 300 150 60 re S
+BT /F1 9 Tf 0.45 0.3 0.2 rg 375 322 Td (signature line) Tj ET
+Q
+
+endstream
+endobj
+2 0 obj
+<< /Length 389 >>
+stream
+
+q
+0.92 0.88 0.85 rg
+0 0 595.28 841.89 re f
+0.6 0.2 0.2 RG 1.5 w
+0.5 0.5 595.28-1 841.89-1 re S
+BT /F1 24 Tf 0.65 0.2 0.2 rg 60 400 Td (THIS PAGE IS ROTATED 90 DEGREES) Tj ET
+BT /F1 10 Tf 0.4 0.2 0.2 rg 60 370 Td (The picker must compensate rotation and report PDF-native coordinates.) Tj ET
+0.85 0.3 0.3 rg
+200 300 260 90 re f
+BT /F1 12 Tf 1 1 1 rg 220 345 Td (ROTATED SEAL AREA) Tj ET
+Q
+
+endstream
+endobj
+3 0 obj
+<< /Length 246 >>
+stream
+
+q
+0.94 0.94 0.9 rg
+0 0 612 792 re f
+0.2 0.2 0.2 RG 1 w
+0.5 0.5 612-1 792-1 re S
+BT /F1 16 Tf 0.2 0.35 0.5 rg 50 720 Td (Page 3 - US Letter size 612x792 pt) Tj ET
+0.3 0.5 0.7 rg
+450 100 120 60 re f
+BT /F1 8 Tf 1 1 1 rg 465 125 Td (STAMP) Tj ET
+Q
+
+endstream
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-BoldOblique >>
+endobj
+8 0 obj
+<< /Font << /F1 4 0 R /F2 5 0 R /F3 6 0 R /F4 7 0 R >> >>
+endobj
+9 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 595.28 841.89] /Resources 8 0 R /Contents 1 0 R >>
+endobj
+10 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 595.28 841.89] /Rotate 90 /Resources 8 0 R /Contents 2 0 R >>
+endobj
+11 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources 8 0 R /Contents 3 0 R >>
+endobj
+12 0 obj
+<< /Type /Pages /Kids [9 0 R 10 0 R 11 0 R] /Count 3 >>
+endobj
+13 0 obj
+<< /Type /Catalog /Pages 12 0 R >>
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000015 00000 n 
+0000000601 00000 n 
+0000001041 00000 n 
+0000001338 00000 n 
+0000001408 00000 n 
+0000001483 00000 n 
+0000001561 00000 n 
+0000001643 00000 n 
+0000001716 00000 n 
+0000001827 00000 n 
+0000001950 00000 n 
+0000002056 00000 n 
+0000002128 00000 n 
+trailer
+<< /Size 14 /Root 13 0 R >>
+startxref
+2179
+%%EOF
