@@ -43,11 +43,10 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.4.1';
+  var VERSION = '4.4.2';
 
   /* ====================== 常量 ====================== */
 
-  var PT_PER_MM = 72 / 25.4;
   var DEFAULT_DPI = 96;
   var CDN_PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
   var CDN_PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -379,18 +378,6 @@
     root.appendChild(fileInput);
     this._fileInput = fileInput;
 
-    // 签章图片文件输入
-    var imgInput = document.createElement('input');
-    imgInput.type = 'file';
-    imgInput.accept = 'image/*';
-    imgInput.style.display = 'none';
-    imgInput.addEventListener('change', function () {
-      if (imgInput.files && imgInput.files[0]) self.setStampImage(imgInput.files[0]);
-      imgInput.value = '';
-    });
-    root.appendChild(imgInput);
-    this._imgInput = imgInput;
-
     var main = document.createElement('div');
     main.className = 'psp-main';
     var scroll = document.createElement('div');
@@ -624,7 +611,12 @@
       self._setLoading(false);
     }).catch(function (err) {
       self._setLoading(false);
-      throw err;
+      var msg = (err && err.message) || String(err);
+      // pdf.js 不可用给出明确提示（可能是离线且本地 vendor 缺失）
+      if (/pdf\.js|pdfjsLib/.test(msg) || /no pdfjsLib|load fail/.test(msg)) {
+        msg = 'pdf.js 加载失败：请确认 vendor/pdf.min.js 存在（离线）或网络可访问 CDN，或配置 pdfjsUrl';
+      }
+      throw new Error(msg);
     });
   };
 
@@ -822,10 +814,11 @@
     n = clamp(Math.round(n || 1), 1, this._totalPages);
     if (this._pdfMode !== 'pdfjs' || !this._pdf) return Promise.resolve();
     if (n === this._pageNumber && this._page) return Promise.resolve();
+    var token = (this._pageToken = (this._pageToken || 0) + 1); // 竞态防护：快速翻页时旧页渲染作废
     this._pageNumber = n;
     this._setLoading(true, '第 ' + n + ' 页渲染中…');
     return this._pdf.getPage(n).then(function (page) {
-      if (self._destroyed) return;
+      if (self._destroyed || token !== self._pageToken) return;
       self._page = page;
       var view = page.view;
       self._pdfW = view[2] - view[0];
@@ -839,13 +832,14 @@
       }
       self._layoutPage();
       return self._renderPage().then(function () {
+        if (self._destroyed || token !== self._pageToken) return;
         self._updateToolbar();
         self._paint();
         self._setLoading(false);
         self._emit('pagechange', self._pageInfo());
       });
     }).catch(function (err) {
-      self._setLoading(false);
+      if (token === this._pageToken) self._setLoading(false);
       throw err;
     });
   };
@@ -1774,6 +1768,8 @@
 
   PdfStampPicker.prototype._onPointerDown = function (e) {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
+    // 未加载页面时忽略点击（_displayW=0 会产生无效坐标）
+    if (!this._displayW || !this._displayH) return;
     // 双指缩放：第二个指针按下时记录起始距离
     if (!this._ptrs) this._ptrs = {};
     this._ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
@@ -2273,7 +2269,12 @@
     url = (url || '').trim();
     if (!url) return;
     this._urlbar.classList.remove('open');
-    this.load(url).catch(function (err) {
+    this._setLoading(true, 'PDF 加载中…');
+    this.load(url).then(function () {
+      self._toast('✅ PDF 加载成功');
+    }).catch(function (err) {
+      self._setLoading(false);
+      self._toast('❌ 加载失败：' + (err.message || err));
       self._emit('error', { message: err.message });
       if (typeof console !== 'undefined') console.error(err);
     });
@@ -2286,6 +2287,8 @@
     if (this._raf) cancelAnimationFrame(this._raf);
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
     if (!this._ro) window.removeEventListener('resize', this._handlers.resize);
+    this._ptrs = null;
+    this._pinch = null;
     if (this._root && this._root.parentNode) this._root.parentNode.removeChild(this._root);
     this._listeners = {};
   };
@@ -2376,16 +2379,28 @@
         finish(null);
       }
       function doConfirm() {
+        if (settled) return;
         var json = picker.toJSON();
         var stampTotal = (json.users || []).reduce(function (n, g) {
           return n + (g.stamps ? g.stamps.length : 0);
         }, 0);
-        if (config.requireStamp && stampTotal === 0) return;
+        if (config.requireStamp && stampTotal === 0) {
+          picker._toast('请先至少放置一个签章点');
+          return;
+        }
         if (config.onConfirm) {
           try {
             var r = config.onConfirm(json);
             if (r && typeof r.then === 'function') {
-              r.then(function () { finish(json); }, function () { /* 用户取消 */ });
+              // async 确认期间禁用按钮防重复点击
+              okBtn.disabled = true;
+              cancelBtn.disabled = true;
+              okBtn.style.opacity = '.6';
+              r.then(function () { finish(json); }, function () {
+                okBtn.disabled = false;
+                cancelBtn.disabled = false;
+                okBtn.style.opacity = '';
+              });
               return;
             }
           } catch (e) { /* ignore */ }
