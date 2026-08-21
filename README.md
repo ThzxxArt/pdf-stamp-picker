@@ -151,6 +151,8 @@ picker.setMode('stamp');
     "currentPage": 1,
     "pageSize": { "width": 595.28, "height": 841.89, "unit": "pt" },
     "rotation": 0,
+    "hash": "fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac",
+    "hashAlgorithm": "SHA-256",
     "generatedAt": "2026-08-21T09:00:00.000Z"
   },
   "users": [
@@ -176,6 +178,7 @@ picker.setMode('stamp');
 ```
 
 - **每个公司（签署方）的签章点坐标归在自己的 `user` 下**，用户信息在外层只出现一次
+- **`document.hash`**：PDF 文件 SHA-256 哈希（Web Crypto 计算，零依赖）——防篡改/文件指纹，对接验签服务可用；本地文件/字节/流接口加载时计算（静态 URL 原生流式加载时为 null，因无完整字节缓存）
 - 签章点只含坐标，**不含图片信息**（`toJSON()`/`getStamps()` 输出无 image；但 `importJSON()` 支持传入带 `image` 的签章点反显章图，见下节）
 - 扁平版 `toFlatJSON()`：`stamps[]` 每项内嵌 `user`，需要按签章点遍历时用
 - 单用户查询：`getStampsByUser(userId)`

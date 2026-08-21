@@ -105,6 +105,9 @@ export interface PickerJSON {
     currentPage: number;
     pageSize: { width: number; height: number; unit: 'pt' };
     rotation: number;
+    /** PDF 文件 SHA-256 哈希（防篡改/文件指纹，部分加载方式下为 null） */
+    hash?: string;
+    hashAlgorithm?: 'SHA-256';
     generatedAt: string;
   };
   /** 签署方数组（含无签章点的签署方，stamps 为空数组） */

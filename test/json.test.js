@@ -3,7 +3,7 @@ const assert = require('assert');
 const PdfStampPickerModule = require('/var/minis/workspace/pdf-stamp-picker/pdf-stamp-picker.js');
 const { _internals, version } = PdfStampPickerModule;
 
-assert.strictEqual(version, '4.7.6');
+assert.strictEqual(version, '4.7.7');
 
 const { buildJSON, buildFlatJSON, genId, normalizeRotation } = _internals;
 
@@ -152,3 +152,13 @@ assert.throws(() => parseImportJSON({ foo: 1 }), /结构无法识别/);
 assert.throws(() => parseImportJSON(null), /需要 JSON 对象/);
 
 console.log('=== v4 单测全部通过（按用户分组/多用户多签章/扁平兼容/无图片/本地候选探测/导入解析） ===');
+
+// --- v4.7.7: document.hash 输出 ---
+const docWithHash = buildJSON({ docName: 'a.pdf', totalPages: 1, currentPage: 1, width: 100, height: 200, rotation: 0, offsetX: 0, offsetY: 0, hash: 'fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac' }, [], []);
+assert.strictEqual(docWithHash.document.hash, 'fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac');
+assert.strictEqual(docWithHash.document.hashAlgorithm, 'SHA-256');
+// 无 hash 时不输出
+const docNoHash = buildJSON({ docName: 'a.pdf', totalPages: 1, currentPage: 1, width: 100, height: 200, rotation: 0, offsetX: 0, offsetY: 0 }, [], []);
+assert.strictEqual('hash' in docNoHash.document, false);
+
+console.log('=== v4 单测全部通过（.../哈希输出） ===');

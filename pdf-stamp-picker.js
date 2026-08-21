@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.6';
+  var VERSION = '4.7.7';
 
   /* ====================== 常量 ====================== */
 
@@ -608,9 +608,18 @@
       if (ftype && ftype.indexOf('pdf') < 0 && ftype.indexOf('octet-stream') < 0 && !/\.pdf$/.test(fname)) {
         return Promise.reject(new Error('不是有效的 PDF 文件：' + (source.name || '')));
       }
-      p = source.arrayBuffer().then(function (buf) { return self._getDoc({ data: buf }); });
+      this._pdfHashPromise = source.arrayBuffer().then(function (buf) {
+        self._pdfBytes = buf;
+        return sha256(buf);
+      });
+      p = this._pdfHashPromise.then(function () {
+        return self._getDoc({ data: self._pdfBytes });
+      });
     } else if (source instanceof ArrayBuffer || (typeof Uint8Array !== 'undefined' && source instanceof Uint8Array)) {
-      p = this._getDoc({ data: source });
+      var bytes = (source instanceof Uint8Array) ? source.slice().buffer : source;
+      this._pdfBytes = bytes;
+      this._pdfHashPromise = sha256(bytes);
+      p = this._pdfHashPromise.then(function () { return self._getDoc({ data: bytes }); });
     } else {
       return Promise.reject(new Error('[PdfStampPicker] 无法识别的 PDF 来源'));
     }
@@ -629,6 +638,12 @@
       self._sel = null;
       self._history = [JSON.stringify([])];
       self._historyIdx = 0;
+      // 等待哈希计算完成（若可用）写入缓存，toJSON() 时同步读取
+      if (self._pdfHashPromise) {
+        self._pdfHashPromise.then(function (h) { self._pdfHash = h; }).catch(function () { self._pdfHash = null; });
+      } else {
+        self._pdfHash = null;
+      }
       self._renderList();
       return self.gotoPage(opts.pageNumber || 1);
     }).then(function () {
@@ -689,6 +704,9 @@
       };
       return pump().then(function () { return new Blob(chunks).arrayBuffer(); });
     }).then(function (buf) {
+      // 缓存字节并计算哈希（静态 URL 走 pdf.js 流式时无字节缓存，哈希为 null）
+      self._pdfBytes = buf;
+      self._pdfHashPromise = sha256(buf);
       return self._getDoc({ data: buf });
     }).catch(function (err) {
       if (err && err.name === 'AbortError') {
@@ -1422,7 +1440,7 @@
    * 直接对应第三方签章接口的 signers[].signAreas[] 模型。
    */
   PdfStampPicker.prototype.toJSON = function () {
-    return buildJSON({
+    var doc = {
       docName: this._docName,
       totalPages: this._totalPages,
       currentPage: this._pageNumber,
@@ -1430,8 +1448,10 @@
       height: this._pdfH,
       rotation: this._rotation,
       offsetX: this._offsetX,
-      offsetY: this._offsetY
-    }, this._stamps, this._users);
+      offsetY: this._offsetY,
+      hash: this._pdfHash || null
+    };
+    return buildJSON(doc, this._stamps, this._users);
   };
 
   /** 扁平版 JSON（旧结构）：stamps 数组每项内嵌 user，按签章点遍历用 */
@@ -2733,6 +2753,21 @@
     return src && typeof src.getPage === 'function' && typeof src.numPages === 'number';
   }
 
+  /** 计算 ArrayBuffer 的 SHA-256 哈希（Web Crypto，零依赖；不支持时返回 null） */
+  function sha256(buf) {
+    if (typeof crypto === 'undefined' || !crypto.subtle) {
+      return Promise.resolve(null); // 非安全上下文（http 非 localhost）等场景
+    }
+    return crypto.subtle.digest('SHA-256', buf).then(function (hash) {
+      var bytes = new Uint8Array(hash);
+      var hex = '';
+      for (var i = 0; i < bytes.length; i++) {
+        hex += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+      }
+      return hex;
+    }).catch(function () { return null; });
+  }
+
   function hexToRgba(hex, alpha) {
     var h = String(hex || '#4285f4').replace('#', '');
     if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
@@ -2835,17 +2870,24 @@
   }
 
   /** 构建完整 JSON（纯函数，可单测） */
-  function buildJSON(doc, stamps, users) {    var userList = (users && users.length) ? users : [{ id: 'default', name: '默认', color: '#4285f4' }];
+  function buildJSON(doc, stamps, users) {
+    var userList = (users && users.length) ? users : [{ id: 'default', name: '默认', color: '#4285f4' }];
     var stampList = stamps || [];
+    var docOut = {
+      name: doc.docName || '',
+      pages: doc.totalPages,
+      currentPage: doc.currentPage,
+      pageSize: { width: round2(doc.width), height: round2(doc.height), unit: 'pt' },
+      rotation: doc.rotation || 0,
+      generatedAt: new Date().toISOString()
+    };
+    // PDF 文件哈希（防篡改/文件指纹；SHA-256）
+    if (doc.hash) {
+      docOut.hash = doc.hash;
+      docOut.hashAlgorithm = 'SHA-256';
+    }
     return {
-      document: {
-        name: doc.docName || '',
-        pages: doc.totalPages,
-        currentPage: doc.currentPage,
-        pageSize: { width: round2(doc.width), height: round2(doc.height), unit: 'pt' },
-        rotation: doc.rotation || 0,
-        generatedAt: new Date().toISOString()
-      },
+      document: docOut,
       users: userList.map(function (u) {
         var userStamps = stampList
           .filter(function (st) { return st.userId === u.id; })
