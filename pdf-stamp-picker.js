@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.2.1';
+  var VERSION = '4.2.2';
 
   /* ====================== 常量 ====================== */
 
@@ -1263,6 +1263,11 @@
       throw new Error('[PdfStampPicker] addStamp 需要 {x, y[, width, height]}');
     }
     var page = sel.page || this._pageNumber;
+    // 快照当前用户的公章图（内部绘制用；JSON 输出不含 image）
+    var img = null;
+    if (this._stampImg && this._stampImg.el) {
+      img = { src: this._stampImg.src, name: this._stampImg.name, width: this._stampImg.w, height: this._stampImg.h };
+    }
     var stamp = {
       id: genId(),
       userId: sel.userId || this._currentUserId,
@@ -1271,6 +1276,7 @@
       x: sel.x, y: sel.y,
       width: (sel.width !== undefined) ? sel.width : 0,
       height: (sel.height !== undefined) ? sel.height : 0,
+      image: img,
       note: sel.note || '',
       createdAt: new Date().toISOString()
     };
@@ -1841,7 +1847,7 @@
     ctx.setLineDash([]);
   };
 
-  /** 绘制全部签章点（非活动：简洁样式） */
+  /** 绘制全部签章点（非活动：显示该签章点自己的公章图/占位） */
   PdfStampPicker.prototype._drawStamps = function (ctx) {
     for (var i = 0; i < this._stamps.length; i++) {
       var st = this._stamps[i];
@@ -1858,6 +1864,17 @@
         var p2 = this.pdfToScreen(st.x + st.width, st.y - st.height);
         var l = Math.min(p.x, p2.x), t = Math.min(p.y, p2.y);
         var w = Math.abs(p2.x - p.x), h = Math.abs(p2.y - p.y);
+        // 签章点有自己的章图 → 画该用户自己的章（不随当前用户变化）
+        var im = st.image ? this._imgFor(st.image.src) : null;
+        if (im && im.complete && im.naturalWidth) {
+          ctx.setLineDash([]);
+          ctx.drawImage(im, l, t, w, h);
+          ctx.strokeStyle = hexToRgba(color, 0.55);
+          ctx.lineWidth = 1;
+          ctx.strokeRect(l, t, w, h);
+          ctx.setLineDash([]);
+          continue;
+        }
         ctx.fillRect(l, t, w, h);
         ctx.strokeRect(l, t, w, h);
         ctx.setLineDash([]);
@@ -1901,12 +1918,17 @@
       return;
     }
 
-    // stamp 模式活动签章：半透明公章（拖放载体）+ 手柄；其他模式/占位画用户色矩形
+    // stamp 模式活动签章：用签章点自己的公章图（半透明+手柄），不随当前用户变化
     var activeSt = isActive ? this.getActiveStamp() : null;
-    if (isActive && activeSt && this._options.mode === 'stamp' && this._stampImg && this._stampImg.el) {
+    var activeImg = null;
+    if (isActive && activeSt && activeSt.image) {
+      activeImg = this._imgFor(activeSt.image.src);
+      if (activeImg && !(activeImg.complete && activeImg.naturalWidth)) activeImg = null;
+    }
+    if (isActive && activeSt && this._options.mode === 'stamp' && activeImg) {
       ctx.save();
-      ctx.globalAlpha = 0.55;
-      ctx.drawImage(this._stampImg.el, x, y, w, h);
+      ctx.globalAlpha = 0.65;
+      ctx.drawImage(activeImg, x, y, w, h);
       ctx.restore();
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
