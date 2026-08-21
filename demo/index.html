@@ -68,6 +68,7 @@
     <div class="panel-title"><span class="icon">⚡</span> 快捷操作</div>
     <div class="ops">
       <button id="btn-json">📋 复制 JSON</button>
+      <button id="btn-import">🔁 导入 JSON 回显</button>
       <button id="btn-clear">🗑 清空签章</button>
     </div>
     <div id="info"></div>
@@ -176,6 +177,15 @@ document.getElementById('new-user').addEventListener('keydown', e => {
 document.getElementById('btn-json').addEventListener('click', async () => {
   if (!picker) return;
   await picker.copyJSON();
+});
+document.getElementById('btn-import').addEventListener('click', async () => {
+  if (!picker) return;
+  // 演示导入回显：导出当前 JSON → 清空 → 再导入（模拟换设备/后端回传后继续编辑）
+  const json = picker.toJSON();
+  picker.clear();
+  await picker.importJSON(json);
+  renderJSON(); renderUsers();
+  toast('✅ JSON 已回显（签章点/公章图/签署方全部恢复）');
 });
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (!picker) return;

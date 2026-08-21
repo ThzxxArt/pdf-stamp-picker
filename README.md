@@ -10,7 +10,7 @@
 
 > ⚠️ 定位说明：这是**签章点坐标选择器**，不是真实盖章渲染器。输出的是签章位置坐标 + 归属用户，**不输出图片**。页面上的公章图只是拖放定位的视觉载体，放置后显示为带用户颜色的占位框。
 
-v4.3 特性：**精致 UI（图标工具栏/卡片列表/序号角标/toast）** · **JSON 按用户分组（users[].stamps[]，直接对接第三方签章接口）** · 点击即放签章（不越界）· 多签章点 · 多用户归属 · 一键弹窗 · 统一加载 · **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
+v4.6 特性：**默认签章模式（点击即放章，章固定大小不越界）** · **JSON 按用户分组（users[].stamps[]，直接对接第三方签章接口）** · **JSON 导入反显（importJSON + 弹窗传 json 回显签章点/公章图）** · 多签章点 · 多用户动态管理 · 撤销/重做 · 一键弹窗（宽高/模式可配）· 统一加载（含进度/中止）· pdf.js 离线资源（cMaps 中文不乱码）· **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
 
 ## 快速开始（真实项目只需一个容器）
 
@@ -23,13 +23,14 @@ v4.3 特性：**精致 UI（图标工具栏/卡片列表/序号角标/toast）**
       { id: 'a', name: '甲方', color: '#4285f4' },
       { id: 'b', name: '乙方', color: '#ea4335' }
     ]
+    // 不传 mode → 默认签章模式（点击即放章）
   });
 
   // 统一加载：本地 File / URL / 文件流接口 都行
   await picker.load('https://example.com/contract.pdf');
 
   picker.on('stampadd', () => {
-    console.log(picker.toJSON());   // 完整 JSON（无图片）
+    console.log(picker.toJSON());   // 分组 JSON（输出不含图片，导入时可带 image 反显）
   });
 </script>
 ```
@@ -175,7 +176,7 @@ picker.setMode('stamp');
 ```
 
 - **每个公司（签署方）的签章点坐标归在自己的 `user` 下**，用户信息在外层只出现一次
-- 签章点只含坐标，**不含图片信息**
+- 签章点只含坐标，**不含图片信息**（`toJSON()`/`getStamps()` 输出无 image；但 `importJSON()` 支持传入带 `image` 的签章点反显章图，见下节）
 - 扁平版 `toFlatJSON()`：`stamps[]` 每项内嵌 `user`，需要按签章点遍历时用
 - 单用户查询：`getStampsByUser(userId)`
 
@@ -284,7 +285,7 @@ await picker.setStampImage(canvasElement);       // canvas 生成的章
 picker.getStampImage();  // → {src, name, width, height}
 ```
 
-> ⚠️ 放置后每个签章点**快照自己的章图**（内部绘制用），切换用户/新放置不影响已放置的章；JSON 输出始终**不含图片**（坐标选择器定位）。
+> ⚠️ 放置后每个签章点**快照自己的章图**（内部绘制用），切换用户/新放置不影响已放置的章；`toJSON()`/`getStamps()` 输出始终**不含图片**（坐标选择器定位）。若需**反显章图**（如后端回传盖章结果），用 `importJSON()` 传入带 `image` 字段的签章点。
 
 ### 坐标转换
 
@@ -301,7 +302,7 @@ picker.addStamp({ x: 100, y: 600, width: 150, height: 80, note: '公章' });
 picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 ```
 
-## 构造选项（全部 19 项）
+## 构造选项（全部 18 项）
 
 | option | 默认 | 说明 |
 |---|---|---|
@@ -312,24 +313,24 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | `showGrid` | `false` | 网格辅助线 |
 | `controls` | `true` | 内置工具栏 + 列表面板（全 UI 内置） |
 | `showList` | `true` | 签章列表面板 |
-| `theme` | `'dark'` | `'dark'` / `'light'`（当前均为浅色内容区 + 深色工具栏） |
+| `theme` | `'dark'` | `'dark'`（深色 viewer）/ `'light'`（浅色）——v4.3.1 起真正区分（背景/工具栏/列表联动） |
 | `dpi` | `96` | px 单位换算参考（影响输出 px 字段） |
 | `users` | 默认用户 | `[{id, name, color}]` 签署方列表 |
 | `currentUser` | 第一个用户 | 当前签章用户 id |
 | `allowMulti` | `true` | 允许多签章点（false 时新放置清空旧点） |
 | `keepSelectionOnPageChange` | `false` | 翻页时是否保留当前选区/选中态 |
 | `stampImage` | 内置公章 | 可选自定义签章图（URL/dataURL/File/canvas；不配则内置公章按用户名生成） |
-| `stampSize` | `120` | 签章图显示基准宽度 px |
-| `minStampSize` / `maxStampSize` | `24` / `480` | 签章图缩放范围（Ctrl+滚轮） |
+| `stampSize` | `120` | 签章图基准尺寸 px（章固定大小，不可运行时缩放） |
+| `minStampSize` / `maxStampSize` | `24` / `480` | ⚠️ 已废弃（v4.4.3 起章固定大小，此两项不再生效） |
 | `pdfjsUrl` | 自动探测 | 显式指定 pdf.js 地址（默认自动探测本地 vendor → CDN 兜底） |
 | `cMapUrl` | 自动探测 | 中文 PDF 字体映射目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN） |
 | `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载，优先级最高） |
 
-### 方法（实例 34 个，全部）
+### 方法（实例 39 个，全部）
 
 | 类别 | 方法 | 说明 |
 |---|---|---|
-| **加载** | `load(source, {pageNumber})` | 统一入口：File/ArrayBuffer/Uint8Array/静态URL/流接口配置/pdfjs proxy |
+| **加载** | `load(source, {pageNumber, mode, signal})` | 统一入口：File/ArrayBuffer/Uint8Array/静态URL/流接口配置/pdfjs proxy；支持加载后切模式、AbortSignal 中止 |
 | | `loadPDF(source, opts)` | 兼容旧名（同 load） |
 | | `setPage(meta)` | 纯画布模式：`{canvas, width, height, rotation, pageNumber, totalPages, name}` |
 | | `gotoPage(n)` | 翻页（Promise），自动补偿旋转 |
@@ -374,7 +375,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | `PdfStampPicker.loadPdfJsAuto()` | 自动探测加载（本地 vendor → CDN 兜底） |
 | `PdfStampPicker.version` | 库版本号字符串 |
 
-### 事件（全部 12 个）
+### 事件（全部 14 个）
 
 | 事件 | 触发时机 | payload |
 |---|---|---|
@@ -398,7 +399,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 - **签章模式（默认）**：点击即放置（完整落定）；拖动微调（拖动中半透明）；**章固定大小不可缩放**（无手柄/Ctrl+滚轮/双指均不缩放章）；点击选中；**不越界**；滚轮=页面滚动
 - **框选**：拖动绘制矩形；`Shift` 锁正方形；完成后自动加入签章列表
 - **点选**：单击放置锚点（双环+准星样式），可拖动移动
-- **多签章**：点击已有签章点切换选中（带手柄），拖拽移动、8 向手柄缩放；每个签章点有**序号角标**
+- **多签章**：点击已有签章点切换选中（章固定大小，选中外发光边框），拖拽移动；框选/点选模式的选区仍带 8 向手柄缩放；每个签章点有**序号角标**
 - **撤销/重做**：工具栏按钮或 Ctrl+Z / Ctrl+Shift+Z（含删除、清空、移动、缩放）
 - **备注编辑**：双击列表项内联编辑签章点备注（note 字段）
 - **重叠警告**：签章点与同页其他签章点重叠时 toast 警告 + `overlap` 事件（不阻止）
