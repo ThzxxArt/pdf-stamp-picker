@@ -1426,31 +1426,10 @@
    */
   PdfStampPicker.prototype.importJSON = function (json, opts) {
     opts = opts || {};
-    if (!json || typeof json !== 'object') {
-      throw new Error('[PdfStampPicker] importJSON 需要 JSON 对象');
-    }
     var self = this;
-    var stamps = [];
-    var users = [];
-
-    // 结构检测：v4 用户分组 users[] | 扁平 stamps[]（内嵌 user）
-    if (Array.isArray(json.users)) {
-      json.users.forEach(function (g) {
-        if (!g || !g.user) return;
-        users.push(g.user);
-        (g.stamps || []).forEach(function (st) {
-          stamps.push(Object.assign({ userId: g.user.id }, st));
-        });
-      });
-    } else if (Array.isArray(json.stamps)) {
-      json.stamps.forEach(function (st) {
-        if (!st) return;
-        users.push(st.user || null);
-        stamps.push(Object.assign({}, st));
-      });
-    } else {
-      throw new Error('[PdfStampPicker] importJSON 结构无法识别（需 users[] 或 stamps[]）');
-    }
+    var parsed = parseImportJSON(json);   // 纯函数：结构解析（含类型检查，可单测）
+    var stamps = parsed.stamps;
+    var users = parsed.users;
 
     // 1) 同步签署方（更新已有 / 添加缺失）
     users.forEach(function (u) {
@@ -2723,8 +2702,7 @@
   }
 
   /** 构建完整 JSON（纯函数，可单测） */
-  function buildJSON(doc, stamps, users) {
-    var userList = (users && users.length) ? users : [{ id: 'default', name: '默认', color: '#4285f4' }];
+  function buildJSON(doc, stamps, users) {    var userList = (users && users.length) ? users : [{ id: 'default', name: '默认', color: '#4285f4' }];
     var stampList = stamps || [];
     return {
       document: {
@@ -2792,7 +2770,37 @@
   }
 
   PdfStampPicker.version = VERSION;
-  PdfStampPicker._internals = { buildJSON: buildJSON, buildFlatJSON: buildFlatJSON, genId: genId, normalizeRotation: normalizeRotation };
+  /**
+   * 解析导入 JSON 结构（纯函数，可单测）：users[] 分组 或 stamps[] 扁平 → {stamps, users}
+   * @returns {{stamps:Array, users:Array}}
+   */
+  function parseImportJSON(json) {
+    var stamps = [];
+    var users = [];
+    if (!json || typeof json !== 'object') {
+      throw new Error('[PdfStampPicker] importJSON 需要 JSON 对象');
+    }
+    if (Array.isArray(json.users)) {
+      json.users.forEach(function (g) {
+        if (!g || !g.user) return;
+        users.push(g.user);
+        (g.stamps || []).forEach(function (st) {
+          stamps.push(Object.assign({ userId: g.user.id }, st));
+        });
+      });
+    } else if (Array.isArray(json.stamps)) {
+      json.stamps.forEach(function (st) {
+        if (!st) return;
+        users.push(st.user || null);
+        stamps.push(Object.assign({}, st));
+      });
+    } else {
+      throw new Error('[PdfStampPicker] importJSON 结构无法识别（需 users[] 或 stamps[]）');
+    }
+    return { stamps: stamps, users: users };
+  }
+
+  PdfStampPicker._internals = { buildJSON: buildJSON, buildFlatJSON: buildFlatJSON, parseImportJSON: parseImportJSON, genId: genId, normalizeRotation: normalizeRotation };
   PdfStampPicker._localCandidates = PdfStampPicker._localCandidates || null; // 由下方赋值（保持单测可访问）
 
   return PdfStampPicker;

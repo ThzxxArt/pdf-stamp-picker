@@ -121,4 +121,34 @@ assert.strictEqual(c3[0], 'https://a.com/apps/vendor/pdf.min.js');
 const c4 = _localCandidates('https://a.com/apps/index.html', 'https://a.com/apps/pdf-stamp-picker.js');
 assert.strictEqual(c4.filter(p => p === 'https://a.com/apps/vendor/pdf.min.js').length, 1);
 
-console.log('=== v4 单测全部通过（按用户分组/多用户多签章/扁平兼容/无图片/本地候选探测） ===');
+// --- v4.6: parseImportJSON 结构解析 ---
+const { parseImportJSON } = PdfStampPickerModule._internals;
+
+// users[] 分组结构
+const p1 = parseImportJSON({
+  users: [
+    { user: { id: 'u1', name: '甲方' }, stamps: [{ id: 's1', x: 10, y: 20 }, { id: 's2', x: 30, y: 40 }] },
+    { user: { id: 'u2', name: '乙方' }, stamps: [] }
+  ]
+});
+assert.strictEqual(p1.users.length, 2);
+assert.strictEqual(p1.stamps.length, 2);
+assert.strictEqual(p1.stamps[0].userId, 'u1', '分组结构应注入 userId');
+assert.strictEqual(p1.stamps[1].userId, 'u1');
+assert.deepStrictEqual(p1.users[0], { id: 'u1', name: '甲方' });
+
+// stamps[] 扁平结构（内嵌 user）
+const p2 = parseImportJSON({
+  stamps: [
+    { id: 'f1', userId: 'x', x: 1, y: 2, user: { id: 'x', name: '丙方' } }
+  ]
+});
+assert.strictEqual(p2.stamps.length, 1);
+assert.strictEqual(p2.stamps[0].userId, 'x');
+assert.deepStrictEqual(p2.users[0], { id: 'x', name: '丙方' });
+
+// 异常结构
+assert.throws(() => parseImportJSON({ foo: 1 }), /结构无法识别/);
+assert.throws(() => parseImportJSON(null), /需要 JSON 对象/);
+
+console.log('=== v4 单测全部通过（按用户分组/多用户多签章/扁平兼容/无图片/本地候选探测/导入解析） ===');
