@@ -3,77 +3,77 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PdfStampPicker v4.1 — 多用户多签章坐标选择器 Demo</title>
+<title>PdfStampPicker v4.3 — 电子签章坐标选择器 Demo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #202124; color: #e8eaed; height: 100vh; display: flex; flex-direction: column; }
-  header { padding: 10px 16px; background: #292a2d; border-bottom: 1px solid #3c4043; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif; background: #f0f2f5; color: #202124; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 12px 20px; background: #fff; border-bottom: 1px solid #e3e6ea; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; box-shadow: 0 1px 4px rgba(60,64,67,.06); z-index: 10; }
+  header .logo { width: 34px; height: 34px; border-radius: 9px; background: linear-gradient(135deg,#4285f4,#6aa9ff); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 17px; box-shadow: 0 2px 6px rgba(66,133,244,.35); flex: none; }
   header h1 { font-size: 15px; font-weight: 600; }
-  header .tag { font-size: 11px; color: #9aa0a6; }
-  .tabs { display: flex; gap: 6px; }
-  .tabs button { border: 1px solid #5f6368; background: transparent; color: #e8eaed; border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
-  .tabs button.active { background: #4285f4; border-color: #4285f4; }
-  .tabs button:hover:not(.active) { background: #35363a; }
-  main { flex: 1; display: flex; min-height: 0; }
-  #stage { flex: 1; min-width: 0; position: relative; }
-  aside { width: 300px; border-left: 1px solid #3c4043; display: flex; flex-direction: column; min-height: 0; background: #292a2d; }
-  aside h2 { font-size: 12px; font-weight: 600; padding: 10px 12px 6px; color: #9aa0a6; }
-  #info { padding: 0 12px 6px; font-size: 11px; color: #8ab4f8; }
-  #output { flex: 1; overflow: auto; padding: 8px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; background: #1f2022; margin: 0 10px 10px; border-radius: 6px; border: 1px solid #3c4043; }
+  header .tag { font-size: 11px; color: #80868b; font-weight: 400; margin-left: 2px; }
+  header .ver { display: inline-block; background: #e8f0fe; color: #4285f4; font-size: 10.5px; font-weight: 600; padding: 2px 9px; border-radius: 12px; margin-left: 6px; vertical-align: middle; }
+  .tabs { display: flex; gap: 4px; background: #f0f2f5; border-radius: 10px; padding: 3px; margin-left: auto; }
+  .tabs button { border: none; background: transparent; color: #5f6368; border-radius: 8px; padding: 6px 14px; font-size: 12px; cursor: pointer; transition: all .15s ease; }
+  .tabs button.active { background: #fff; color: #1a73e8; font-weight: 600; box-shadow: 0 1px 4px rgba(60,64,67,.12); }
+  .tabs button:hover:not(.active) { color: #202124; }
+  main { flex: 1; display: flex; min-height: 0; padding: 14px; gap: 14px; }
+  #stage { flex: 1; min-width: 0; position: relative; background: #fff; border-radius: 14px; box-shadow: 0 2px 12px rgba(60,64,67,.1); overflow: hidden; }
+  aside { width: 330px; display: flex; flex-direction: column; min-height: 0; background: #fff; border-radius: 14px; box-shadow: 0 2px 12px rgba(60,64,67,.1); overflow: hidden; }
+  aside .panel-title { font-size: 11.5px; font-weight: 700; color: #5f6368; padding: 14px 16px 8px; letter-spacing: .4px; text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
+  aside .panel-title .icon { font-size: 13px; }
+  .signers { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px; }
+  .signers button { border: 1px solid #e3e6ea; background: #f8f9fa; color: #3c4043; border-radius: 18px; padding: 4px 12px; font-size: 11.5px; cursor: pointer; transition: all .15s ease; display: inline-flex; align-items: center; gap: 5px; }
+  .signers button .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .signers button.active { border-color: transparent; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+  .signers button .rm { color: #b0b4ba; font-size: 13px; margin-left: 2px; line-height: 1; }
+  .signers button .rm:hover { color: #ea4335; }
+  .add-signer { display: flex; gap: 6px; padding: 0 16px 8px; }
+  .add-signer input { flex: 1; background: #f8f9fa; border: 1px solid #e3e6ea; border-radius: 8px; padding: 6px 10px; font-size: 11.5px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; min-width: 0; }
+  .add-signer input:focus { border-color: #4285f4; box-shadow: 0 0 0 3px rgba(66,133,244,.12); }
+  .add-signer button { background: #34a853; color: #fff; border: none; border-radius: 8px; padding: 6px 14px; font-size: 11.5px; cursor: pointer; font-weight: 600; transition: background .15s ease; }
+  .add-signer button:hover { background: #2d9249; }
+  .ops { display: flex; gap: 8px; padding: 2px 16px 12px; flex-wrap: wrap; }
+  .ops button { background: #f8f9fa; border: 1px solid #e3e6ea; color: #3c4043; border-radius: 8px; padding: 6px 14px; font-size: 11.5px; cursor: pointer; transition: all .15s ease; display: inline-flex; align-items: center; gap: 5px; }
+  .ops button:hover { background: #eef1f4; border-color: #c9ced4; }
+  .ops button.primary { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+  .ops button.primary:hover { background: #1765cc; }
+  .json-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid #eef0f3; }
+  .json-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 6px; font-size: 11.5px; font-weight: 700; color: #5f6368; letter-spacing: .4px; text-transform: uppercase; }
+  .json-head .json-meta { font-size: 10.5px; color: #80868b; font-weight: 400; text-transform: none; letter-spacing: 0; }
+  #output { flex: 1; overflow: auto; margin: 0 12px 12px; padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; background: #f8f9fa; border: 1px solid #e8eaed; border-radius: 10px; color: #3c4043; }
   #output .dim { color: #9aa0a6; }
-  .actions { display: flex; gap: 8px; padding: 0 12px 10px; flex-wrap: wrap; }
-  .actions button { background: #3c4043; color: #e8eaed; border: none; border-radius: 6px; padding: 5px 10px; font-size: 11px; cursor: pointer; }
-  .actions button:hover { background: #4a4d51; }
-  .actions button.active { background: #4285f4; }
-  .actions button.primary { background: #34a853; }
-  .actions button.primary:hover { background: #3cb85f; }
-  .users { display: flex; gap: 6px; padding: 0 12px 8px; flex-wrap: wrap; }
-  .users button { border: 1px solid #5f6368; background: transparent; color: #e8eaed; border-radius: 16px; padding: 3px 12px; font-size: 11px; cursor: pointer; }
-  .users button.active { border-color: transparent; font-weight: 600; }
-  .users button .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
-  .badge { display: inline-block; background: #34a853; color: #fff; font-size: 10px; padding: 2px 8px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
+  #info { padding: 0 16px 10px; font-size: 11px; color: #1a73e8; }
+  .badge { display: inline-block; background: #e8f0fe; color: #4285f4; font-size: 10px; padding: 1px 8px; border-radius: 10px; margin-left: 6px; vertical-align: middle; font-weight: 600; }
 </style>
 </head>
 <body>
 <header>
-  <h1>PdfStampPicker <span class="tag">v4.1.0 · 单文件零依赖</span></h1>
+  <div class="logo">🖊</div>
+  <h1>PdfStampPicker <span class="tag">单文件 · 零依赖 · 坐标选择器</span><span class="ver" id="ver-tag">v4.3.0</span></h1>
   <nav class="tabs">
-    <button id="tab-container" class="active">容器模式（多用户/多签章）</button>
-    <button id="tab-canvas">纯画布模式</button>
-    <button id="tab-modal">弹窗模式</button>
+    <button id="tab-container" class="active">容器模式</button>
+    <button id="tab-canvas">纯画布</button>
+    <button id="tab-modal">弹窗</button>
   </nav>
 </header>
 <main>
   <div id="stage"></div>
   <aside>
-    <h2>签署方管理 <span class="badge">可动态增删</span></h2>
-    <div class="users" id="users"></div>
-    <div style="display:flex;gap:6px;padding:0 12px 8px">
-      <input id="new-user" type="text" placeholder="输入公司/签署方名称，回车添加" style="flex:1;background:#2a2d33;color:#e8eaed;border:1px solid #3c4043;border-radius:6px;padding:5px 8px;font-size:11px;outline:none">
-      <button id="btn-adduser" style="background:#34a853;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">添加</button>
+    <div class="panel-title"><span class="icon">👥</span> 签署方管理 <span class="badge" id="signer-count">0</span></div>
+    <div class="signers" id="users"></div>
+    <div class="add-signer">
+      <input id="new-user" type="text" placeholder="输入公司名，回车添加…">
+      <button id="btn-adduser">添加</button>
     </div>
-    <h2>实时 JSON 输出</h2>
+    <div class="panel-title"><span class="icon">⚡</span> 快捷操作</div>
+    <div class="ops">
+      <button id="btn-json">📋 复制 JSON</button>
+      <button id="btn-clear">🗑 清空签章</button>
+    </div>
     <div id="info"></div>
-    <div id="output">等待操作…</div>
-    <h2 style="padding-bottom:4px">选择模式</h2>
-    <div class="actions">
-      <button id="mode-rect" class="active">框选</button>
-      <button id="mode-point">点选</button>
-      <button id="mode-stamp">签章（拖公章）</button>
-    </div>
-    <h2 style="padding-bottom:4px">操作</h2>
-    <div class="actions">
-      <button id="btn-add">程序化加签章</button>
-      <button id="btn-json">复制 JSON</button>
-      <button id="btn-clear">清空</button>
-    </div>
-    <h2 style="padding-bottom:4px">加载方式</h2>
-    <div class="actions">
-      <button id="btn-local">📁 本地上传</button>
-      <button id="btn-stream">🔗 文件流接口模拟</button>
-    </div>
-    <div style="padding:0 12px 10px;font-size:10.5px;color:#9aa0a6;line-height:1.6">
-      💡 签章模式：点击/拖动放置签章点（松手即落定）；滚轮滚动页面，Ctrl+滚轮缩放；章不越界。
+    <div class="json-wrap">
+      <div class="json-head">JSON 输出 <span class="json-meta" id="json-meta"></span></div>
+      <div id="output"><span class="dim">选择签章点后这里实时显示分组 JSON…</span></div>
     </div>
   </aside>
 </main>
@@ -86,6 +86,21 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '../vendor/pdf.worker.min.js';
 const stage = document.getElementById('stage');
 const output = document.getElementById('output');
 const info = document.getElementById('info');
+const jsonMeta = document.getElementById('json-meta');
+
+let picker = null;
+
+// 简单 toast（demo 用）
+function toast(msg) {
+  const t = document.createElement('div');
+  t.style.cssText = 'position:fixed;left:50%;bottom:30px;transform:translateX(-50%);background:rgba(32,33,36,.92);color:#fff;padding:9px 18px;border-radius:10px;font-size:12.5px;z-index:100000;box-shadow:0 6px 24px rgba(0,0,0,.3);animation:fadeUp .22s ease;pointer-events:none';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.transition = 'opacity .25s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 260); }, 1500);
+}
+const styleEl = document.createElement('style');
+styleEl.textContent = '@keyframes fadeUp{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}';
+document.head.appendChild(styleEl);
 
 const USERS = [
   { id: 'u1', name: '甲方', color: '#4285f4' },
@@ -93,45 +108,52 @@ const USERS = [
   { id: 'u3', name: '丙方', color: '#34a853' }
 ];
 
-let picker = null;
+function renderJSON() {
+  if (!picker) return;
+  const json = picker.toJSON();
+  output.textContent = JSON.stringify(json, null, 2);
+  const total = json.users.reduce((n, g) => n + g.stamps.length, 0);
+  const signed = json.users.filter(g => g.stamps.length > 0).map(g => g.user.name).join('、') || '无';
+  jsonMeta.textContent = total ? `${total} 个签章点 · ${signed}` : '';
+  info.textContent = total ? `✅ 已设置 ${total} 个签章点（${signed}）` : '提示：左侧选模式，在 PDF 上放置签章点';
+}
 
-// 动态渲染签署方按钮列表
 function renderUsers() {
   const wrap = document.getElementById('users');
   wrap.innerHTML = '';
+  if (!picker) return;
   const cu = picker.getCurrentUser();
+  document.getElementById('signer-count').textContent = picker._users.length;
   picker._users.forEach(u => {
     const btn = document.createElement('button');
     btn.dataset.id = u.id;
-    btn.classList.toggle('active', u.id === cu.id);
-    btn.style.borderColor = u.id === cu.id ? u.color : '#5f6368';
-    btn.innerHTML = `<span class="dot" style="background:${u.color}"></span>${u.name}`;
-    btn.title = u.id === cu.id ? '当前签署方' : '点击切换';
-    // 删除按钮（当前用户不可删）
-    if (u.id !== cu.id) {
-      const del = document.createElement('span');
-      del.textContent = ' ×';
-      del.style.cssText = 'cursor:pointer;color:#b0b4ba;margin-left:4px;font-size:12px';
-      del.title = '移除该签署方';
-      del.addEventListener('click', e => {
+    const isActive = u.id === cu.id;
+    btn.classList.toggle('active', isActive);
+    btn.style.background = isActive ? u.color : '';
+    btn.style.color = isActive ? '#fff' : '';
+    btn.innerHTML = `<span class="dot" style="background:${isActive ? '#fff' : u.color}"></span>${u.name}`;
+    if (!isActive) {
+      const rm = document.createElement('span');
+      rm.className = 'rm';
+      rm.textContent = '×';
+      rm.title = '移除该签署方';
+      rm.addEventListener('click', e => {
         e.stopPropagation();
         picker.removeUser(u.id);
-        renderUsers();
-        renderJSON();
-        info.textContent = `已移除签署方「${u.name}」及其签章点`;
+        renderUsers(); renderJSON();
+        toast(`已移除「${u.name}」及其签章点`);
       });
-      btn.appendChild(del);
+      btn.appendChild(rm);
     }
     btn.addEventListener('click', () => {
       picker.setCurrentUser(u.id);
       renderUsers();
-      info.textContent = `当前签章用户: ${picker.getCurrentUser().name}`;
+      toast(`当前签署方：${picker.getCurrentUser().name}`);
     });
     wrap.appendChild(btn);
   });
 }
 
-// 添加签署方
 function addUserByName(name) {
   name = (name || '').trim();
   if (!name) return;
@@ -139,7 +161,7 @@ function addUserByName(name) {
   picker.addUser({ id, name });
   picker.setCurrentUser(id);
   renderUsers();
-  info.textContent = `已添加签署方「${name}」，当前为其设置签章点`;
+  toast(`已添加签署方「${name}」`);
 }
 document.getElementById('btn-adduser').addEventListener('click', () => {
   addUserByName(document.getElementById('new-user').value);
@@ -151,14 +173,22 @@ document.getElementById('new-user').addEventListener('keydown', e => {
     document.getElementById('new-user').value = '';
   }
 });
-
-function renderJSON() {
+document.getElementById('btn-json').addEventListener('click', async () => {
   if (!picker) return;
-  const json = picker.toJSON();
-  output.textContent = JSON.stringify(json, null, 2);
-  const total = json.users.reduce((n, g) => n + g.stamps.length, 0);
-  const signed = json.users.filter(g => g.stamps.length > 0).map(g => g.user.name).join('、') || '无';
-  info.textContent = `文档: ${json.document.name || '(未命名)'} · ${json.document.pages}页 · 签章点 ${total} 个（${signed}）`;
+  await picker.copyJSON();
+});
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (!picker) return;
+  picker.clear();
+  renderJSON(); renderUsers();
+  toast('已清空全部签章点');
+});
+
+function bindPicker(p) {
+  ['stampadd','stampremove','stampchange','stampselect','clear','pagechange'].forEach(t => p.on(t, () => { renderJSON(); renderUsers(); }));
+  p.on('error', e => { info.textContent = '加载失败: ' + e.message; console.error(e); });
+  p.on('stampadd', () => toast('签章点已放置 ✓'));
+  p.on('stampremove', () => toast('已删除签章点'));
 }
 
 function initContainerMode() {
@@ -168,110 +198,19 @@ function initContainerMode() {
     controls: true,
     users: USERS,
     currentUser: 'u1',
-    showGrid: false,
     zoom: 'fit-width'
   });
-  picker.on('stampadd', renderJSON);
-  picker.on('stampremove', renderJSON);
-  picker.on('stampchange', renderJSON);
-  picker.on('stampselect', renderJSON);
-  picker.on('clear', renderJSON);
-  picker.on('pagechange', renderJSON);
-  picker.on('error', e => { info.textContent = '加载失败: ' + e.message; console.error(e); });
-
-  // 远程静态地址加载（测试 PDF）
+  bindPicker(picker);
   picker.load('test.pdf').then(() => {
-    renderJSON();
-    renderUsers();
-    // 预生成当前用户（甲方）的内置公章
+    renderJSON(); renderUsers();
     return picker._ensureStampImage();
   }).then(() => {
-    info.textContent = '已加载 test.pdf · 可添加/移除签署方 · 签章模式拖动放置（不越界）';
-  }).catch(e => {
-    info.textContent = '加载失败: ' + e.message;
-    console.error(e);
-  });
+    info.textContent = '已加载 test.pdf（3页）· 顶部工具栏可切换模式';
+  }).catch(e => { info.textContent = '加载失败: ' + e.message; });
 }
 
-// 用户切换（委托）
-document.getElementById('users').addEventListener('click', e => {
-  const btn = e.target.closest('button');
-  if (!btn || !picker) return;
-  picker.setCurrentUser(btn.dataset.id);
-  document.querySelectorAll('#users button').forEach(b => b.classList.toggle('active', b === btn));
-  info.textContent = `当前签章用户: ${picker.getCurrentUser().name}`;
-});
-
-// 模式切换：框选 / 点选 / 签章
-document.getElementById('mode-rect').addEventListener('click', e => {
-  if (!picker) return;
-  picker.setMode('rect');
-  setModeBtn('mode-rect');
-  info.textContent = '框选模式：按住拖动绘制签章区域';
-});
-document.getElementById('mode-point').addEventListener('click', e => {
-  if (!picker) return;
-  picker.setMode('point');
-  setModeBtn('mode-point');
-  info.textContent = '点选模式：单击放置签章锚点';
-});
-document.getElementById('mode-stamp').addEventListener('click', e => {
-  if (!picker) return;
-  picker.setMode('stamp');
-  setModeBtn('mode-stamp');
-  info.textContent = '签章模式：点击放置签章点，按住拖动，滚轮缩放，公章名字=当前用户';
-});
-function setModeBtn(id) {
-  document.querySelectorAll('#mode-rect,#mode-point,#mode-stamp').forEach(b => b.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
-
-// 本地上传
-document.getElementById('btn-local').addEventListener('click', () => {
-  if (!picker) return;
-  picker._fileInput.click();
-});
-
-// 文件流接口模拟（带自定义请求头走 fetch 分支）
-document.getElementById('btn-stream').addEventListener('click', async () => {
-  if (!picker) return;
-  info.textContent = '正在通过文件流接口加载（fetch + 自定义头）…';
-  try {
-    await picker.load({ url: 'test.pdf', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Authorization': 'Bearer demo-token' } });
-    info.textContent = '文件流接口加载成功 ✓（模拟 {url, headers} 方式，适合带鉴权的真实接口）';
-    renderJSON();
-  } catch (err) {
-    info.textContent = '文件流接口加载失败: ' + err.message;
-  }
-});
-
-// 程序化添加
-document.getElementById('btn-add').addEventListener('click', () => {
-  if (!picker) return;
-  const stamp = picker.addStamp({ x: 100, y: 600, width: 150, height: 80, note: '程序化添加' });
-  info.textContent = `已添加签章点 ${stamp.id}（当前用户: ${picker.getCurrentUser().name}）`;
-  renderJSON();
-});
-
-// 复制 JSON
-document.getElementById('btn-json').addEventListener('click', async () => {
-  if (!picker) return;
-  await picker.copyJSON();
-  info.textContent = 'JSON 已复制到剪贴板 ✅';
-});
-
-// 清空
-document.getElementById('btn-clear').addEventListener('click', () => {
-  if (!picker) return;
-  picker.clear();
-  info.textContent = '已清空全部签章点';
-  renderJSON();
-});
-
-// ============ 纯画布模式 ============
 function initCanvasMode() {
   stage.innerHTML = '';
-  // 宿主自行渲染"合同页"canvas（模拟：库不参与渲染，只做坐标选择）
   const W = 595.28, H = 841.89;
   const cv = document.createElement('canvas');
   const scale = 2;
@@ -292,17 +231,15 @@ function initCanvasMode() {
   ctx.strokeStyle = '#36c'; ctx.strokeRect(80, 680, 180, 50); ctx.fillStyle = '#36c'; ctx.fillText('签字处', 150, 710);
 
   picker = new PdfStampPicker(stage, { mode: 'stamp', controls: true, users: USERS, currentUser: 'u2' });
-  ['stampadd','stampremove','stampchange','stampselect','clear','pagechange'].forEach(t => picker.on(t, renderJSON));
-  picker.on('error', e => { info.textContent = '错误: ' + e.message; console.error(e); });
+  bindPicker(picker);
   picker.setPage({ canvas: cv, width: W, height: H, rotation: 0, pageNumber: 1, totalPages: 1, name: 'canvas合同.pdf' });
   picker._ensureStampImage().then(() => {
     renderUsers();
-    info.textContent = '纯画布模式：宿主渲染 canvas，库只做坐标选择（setPage）';
+    info.textContent = '纯画布模式：宿主渲染 canvas，库只做坐标选择';
     renderJSON();
   });
 }
 
-// ============ Tab 切换 ============
 function switchTab(activeId) {
   ['tab-container','tab-canvas','tab-modal'].forEach(id => {
     document.getElementById(id).classList.toggle('active', id === activeId);
@@ -323,25 +260,24 @@ document.getElementById('tab-canvas').addEventListener('click', () => {
 document.getElementById('tab-modal').addEventListener('click', () => {
   if (document.getElementById('tab-modal').classList.contains('active')) return;
   switchTab('tab-modal');
-
-  // 一键弹窗：确认后返回 JSON
   PdfStampPicker.openModal({
-    source: 'test.pdf',   // 也支持 File / {url, headers} / ArrayBuffer
-    title: '选择签章位置（弹窗模式）',
+    source: 'test.pdf',
+    title: '选择签章位置（弹窗）',
     users: USERS,
     currentUser: 'u2',
     confirmText: '确认签章',
-    cancelText: '取消',
-    requireStamp: true,   // 必须有签章点才能确认
+    requireStamp: true,
     pickerOptions: { controls: true, zoom: 'fit-width', mode: 'stamp' },
-    onConfirm: json => { const n = json.users.reduce((a, g) => a + g.stamps.length, 0); console.log('用户确认，签章点数量:', n); }
+    onConfirm: json => { const n = json.users.reduce((a, g) => a + g.stamps.length, 0); console.log('确认', n, '个签章点'); }
   }).then(json => {
     if (json) {
       const n = json.users.reduce((a, g) => a + g.stamps.length, 0);
-      info.textContent = `弹窗确认：返回 ${n} 个签章点（按用户分组）JSON`;
       output.textContent = JSON.stringify(json, null, 2);
+      jsonMeta.textContent = `${n} 个签章点`;
+      info.textContent = `弹窗确认：返回 ${n} 个签章点（按用户分组）`;
+      toast(`弹窗确认：${n} 个签章点`);
     } else {
-      info.textContent = '弹窗已取消';
+      toast('已取消');
     }
     switchTab('tab-container');
   });

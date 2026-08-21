@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.2.4';
+  var VERSION = '4.3.0';
 
   /* ====================== 常量 ====================== */
 
@@ -95,7 +95,9 @@
     '.psp-list-body{flex:1;overflow:auto;padding:2px 10px 12px}',
     '.psp-list-body::-webkit-scrollbar{width:6px}',
     '.psp-list-body::-webkit-scrollbar-thumb{background:rgba(0,0,0,.18);border-radius:3px}',
-    '.psp-list-empty{font-size:11.5px;color:#9aa0a6;padding:18px 8px;text-align:center;line-height:1.7}',
+    '.psp-list-empty{font-size:11.5px;color:#9aa0a6;padding:26px 8px;text-align:center;line-height:1.7}',
+    '.psp-empty-icon{font-size:22px;margin-bottom:6px;opacity:.7}',
+    '.psp-empty-tip{font-size:10.5px;color:#b0b4ba;margin-top:2px}',
     '.psp-group-head{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;color:#5f6368;padding:12px 6px 5px;letter-spacing:.2px}',
     '.psp-group-head .psp-gname{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
     '.psp-group-head .psp-gcount{background:rgba(0,0,0,.07);color:#5f6368;border-radius:9px;padding:0 7px;font-size:10px;font-variant-numeric:tabular-nums}',
@@ -105,7 +107,8 @@
     '.psp-dot{width:11px;height:11px;border-radius:50%;flex:none;border:2px solid rgba(255,255,255,.9);box-shadow:0 0 0 1.5px rgba(0,0,0,.14)}',
     '.psp-item-main{flex:1;min-width:0;font-size:11.5px;line-height:1.5}',
     '.psp-item-main .psp-item-sub{color:#80868b;font-size:10.5px;font-variant-numeric:tabular-nums}',
-    '.psp-del{background:none;border:none;color:#b0b4ba;font-size:15px;cursor:pointer;padding:2px 5px;border-radius:6px;flex:none;line-height:1;opacity:0;transition:opacity .15s ease,background .15s ease,color .15s ease}',
+    '.psp-page-badge{display:inline-block;background:rgba(66,133,244,.12);color:#4285f4;border-radius:5px;padding:0 5px;font-size:10px;font-weight:600;margin-right:4px;font-variant-numeric:tabular-nums}',
+    '.psp-del{background:none;border:none;color:#9aa0a6;font-size:15px;cursor:pointer;padding:2px 5px;border-radius:6px;flex:none;line-height:1;opacity:.5;transition:opacity .15s ease,background .15s ease,color .15s ease}',
     '.psp-item:hover .psp-del{opacity:1}',
     '.psp-del:hover{background:rgba(234,67,53,.12);color:#ea4335}',
     /* ===== 主题 ===== */
@@ -128,7 +131,10 @@
     '.psp-btn-ghost:hover{background:rgba(0,0,0,.05)}',
     '@keyframes pspFadeIn{from{opacity:0}to{opacity:1}}',
     '@keyframes pspModalIn{from{opacity:0;transform:scale(.92) translateY(14px)}to{opacity:1;transform:scale(1) translateY(0)}}',
-    '@keyframes pspSlideDown{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}'
+    '@keyframes pspSlideDown{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}',
+    '.psp-toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);background:rgba(32,33,36,.92);color:#fff;padding:9px 18px;border-radius:10px;font-size:12.5px;font-family:system-ui,sans-serif;z-index:100000;box-shadow:0 6px 24px rgba(0,0,0,.3);animation:pspToastIn .22s ease;pointer-events:none;white-space:nowrap}',
+    '.psp-toast.psp-toast-hide{opacity:0;transform:translateX(-50%) translateY(8px);transition:opacity .25s ease,transform .25s ease}',
+    '@keyframes pspToastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}'
   ].join('');
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -1249,9 +1255,10 @@
   };
 
   PdfStampPicker.prototype.copyJSON = function () {
+    var self = this;
     var json = this.toJSON();
     var text = JSON.stringify(json, null, 2);
-    var done = function () { return json; };
+    var done = function () { self._toast('✅ JSON 已复制到剪贴板'); return json; };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       return navigator.clipboard.writeText(text).then(done, done);
     }
@@ -1263,7 +1270,22 @@
     ta.select();
     try { document.execCommand('copy'); } catch (e) { /* ignore */ }
     document.body.removeChild(ta);
+    done();
     return Promise.resolve(json);
+  };
+
+  /** 轻提示（内置，无依赖） */
+  PdfStampPicker.prototype._toast = function (msg, ms) {
+    if (typeof document === 'undefined') return;
+    var self = this;
+    var el = document.createElement('div');
+    el.className = 'psp-toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function () {
+      el.classList.add('psp-toast-hide');
+      setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 260);
+    }, ms || 1600);
   };
 
   /**
@@ -1406,7 +1428,7 @@
     if (!this._stamps.length) {
       var empty = document.createElement('div');
       empty.className = 'psp-list-empty';
-      empty.textContent = '暂无签章点\n在页面上框选/点选即可添加';
+      empty.innerHTML = '<div class="psp-empty-icon">🖊</div><div>暂无签章点</div><div class="psp-empty-tip">在页面上框选 / 点选 / 拖放公章即可添加</div>';
       this._listBody.appendChild(empty);
       return;
     }
@@ -1442,8 +1464,8 @@
         var sizeTxt = (st.width > 0 && st.height > 0)
           ? fmt(st.width) + '×' + fmt(st.height) + 'pt'
           : '点选位置';
-        main.innerHTML = '<div>第' + st.page + '页</div>' +
-                         '<div class="psp-item-sub">' + sizeTxt + ' · (' + fmt(st.x) + ', ' + fmt(st.y) + ')</div>';
+        main.innerHTML = '<div><span class="psp-page-badge">P' + st.page + '</span> ' + sizeTxt + '</div>' +
+                         '<div class="psp-item-sub">(' + fmt(st.x) + ', ' + fmt(st.y) + ')</div>';
         var del = document.createElement('button');
         del.className = 'psp-del';
         del.title = '删除';
@@ -1841,7 +1863,7 @@
     ctx.setLineDash([]);
   };
 
-  /** 绘制全部签章点（非活动：显示该签章点自己的公章图/占位） */
+  /** 绘制全部签章点（非活动：显示该签章点自己的公章图/占位 + 序号角标） */
   PdfStampPicker.prototype._drawStamps = function (ctx) {
     for (var i = 0; i < this._stamps.length; i++) {
       var st = this._stamps[i];
@@ -1866,6 +1888,7 @@
           ctx.strokeStyle = hexToRgba(color, 0.55);
           ctx.lineWidth = 1;
           ctx.strokeRect(l, t, w, h);
+          drawSeqBadge(ctx, i + 1, l, t, color);
           ctx.setLineDash([]);
           continue;
         }
@@ -1882,6 +1905,7 @@
         ctx.fillRect(lx, ly, tw + 8, 14);
         ctx.fillStyle = '#fff';
         ctx.fillText(uname, lx + 4, ly + 10);
+        drawSeqBadge(ctx, i + 1, l, t, color);
       } else {
         ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
         ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.stroke();
@@ -1889,6 +1913,7 @@
         ctx.moveTo(p.x - 9, p.y); ctx.lineTo(p.x + 9, p.y);
         ctx.moveTo(p.x, p.y - 9); ctx.lineTo(p.x, p.y + 9);
         ctx.stroke();
+        drawSeqBadge(ctx, i + 1, p.x, p.y, color);
       }
       ctx.setLineDash([]);
     }
@@ -1898,17 +1923,30 @@
   PdfStampPicker.prototype._drawRectSel = function (ctx, s, color, isActive) {
     var x = s.x, y = s.y, w = s.w, h = s.h;
     if (this._options.mode === 'point' && w === 0 && h === 0) {
+      // 精致锚点：外环 + 内点 + 准星光晕
+      ctx.save();
+      ctx.shadowColor = hexToRgba(color, 0.6);
+      ctx.shadowBlur = 8;
       ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]);
-      ctx.strokeRect(x - 14, y - 14, 28, 28);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = hexToRgba(color, 0.45);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(x, y, 15, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(x - 8, y); ctx.lineTo(x + 8, y);
-      ctx.moveTo(x, y - 8); ctx.lineTo(x, y + 8);
+      ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y);
+      ctx.moveTo(x, y - 6); ctx.lineTo(x, y + 6);
       ctx.stroke();
-      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.stroke();
       return;
     }
 
@@ -1929,6 +1967,8 @@
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, w, h);
+      var seqIdx = this._stamps.indexOf(activeSt);
+      if (seqIdx >= 0) drawSeqBadge(ctx, seqIdx + 1, x, y, color);
       drawHandles(ctx, x, y, w, h, color);
       drawSizeLabel(this, ctx, x, y, w, h);
       return;
@@ -1958,6 +1998,10 @@
         ctx.stroke();
       }
       ctx.setLineDash([]);
+      if (activeSt) {
+        var seqIdx2 = this._stamps.indexOf(activeSt);
+        if (seqIdx2 >= 0) drawSeqBadge(ctx, seqIdx2 + 1, x, y, color);
+      }
       drawHandles(ctx, x, y, w, h, color);
       drawSizeLabel(this, ctx, x, y, w, h);
     }
@@ -2180,6 +2224,28 @@
       ctx.fillStyle = '#fff';
       ctx.fillText(label, bx + 6, by + 13);
     }
+  }
+
+  /** 绘制序号角标（用户色圆底 + 白色序号） */
+  function drawSeqBadge(ctx, n, x, y, color) {
+    var r = 8;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.3)';
+    ctx.shadowBlur = 3;
+    ctx.shadowOffsetY = 1;
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 9px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(n), x, y + 0.5);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
   }
 
   /** 构建完整 JSON（纯函数，可单测） */
