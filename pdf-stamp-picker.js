@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.5.0';
+  var VERSION = '4.5.1';
 
   /* ====================== 常量 ====================== */
 
@@ -707,7 +707,7 @@
       var probe = function () {
         if (idx >= cMapCands.length) return Promise.resolve();
         var src = cMapCands[idx++];
-        return fetch(src + 'greek.bcmap', { method: 'HEAD' }).then(function (res) {
+        return fetch(src + '78-EUC-H.bcmap', { method: 'HEAD' }).then(function (res) {
           if (res.ok) { self._detectedCMapUrl = src; }
           else throw new Error('no');
         }).catch(probe);

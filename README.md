@@ -377,7 +377,7 @@ Demo 展示：容器模式（多用户多签章/三种模式/动态签署方）/
 
 ```
 pdf-stamp-picker/
-├── pdf-stamp-picker.js      # 库本体（单文件 ~98KB，零依赖）
+├── pdf-stamp-picker.js      # 库本体（单文件 ~110KB，零依赖）
 ├── pdf-stamp-picker.d.ts    # TypeScript 类型声明
 ├── package.json             # npm 包元数据（main/module/types/exports）
 ├── LICENSE                  # MIT
@@ -386,8 +386,13 @@ pdf-stamp-picker/
 ├── demo/
 │   ├── index.html           # Demo（多用户多签章/纯画布/弹窗）
 │   ├── test.pdf             # 测试 PDF（3 页，含 /Rotate 90）
-│   └── gen_test_pdf.py      # 测试 PDF 生成脚本
-├── vendor/                  # 本地化 pdf.js（可选，库会自动探测/加载 CDN）
+│   ├── chinese-cid.pdf      # 中文 GBK CID 测试 PDF（验证 cMaps）
+│   ├── gen_test_pdf.py      # 测试 PDF 生成脚本
+│   └── gen_chinese_pdf.py   # 中文 PDF 生成脚本
+├── vendor/                  # pdf.js 完整离线资源（自动探测加载）
+│   ├── pdf.min.js           # pdf.js 主库（320KB）
+│   ├── pdf.worker.min.js    # 解析 worker（1.08MB）
+│   └── cMaps/               # 169 个字体映射（中文 PDF 离线不乱码）
 └── test/
     ├── coords.test.js       # 坐标转换（4 旋转 × 7 点往返）
     └── json.test.js         # JSON 结构 / 多用户 / 本地候选探测
