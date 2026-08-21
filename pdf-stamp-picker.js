@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.4.2';
+  var VERSION = '4.4.3';
 
   /* ====================== 常量 ====================== */
 
@@ -1687,7 +1687,7 @@
     this._overlay.addEventListener('pointercancel', this._handlers.up);
     this._overlay.addEventListener('wheel', this._handlers.wheel, { passive: false });
     this._root.addEventListener('keydown', this._handlers.key);
-    this._pinch = null; // 双指缩放状态 {dist, zoom, mode, stampW}
+    this._pinch = null; // 双指缩放状态 {dist, zoom}
     if (typeof ResizeObserver !== 'undefined') {
       this._ro = new ResizeObserver(function () { self._onResize(); });
       this._ro.observe(this._container);
@@ -1709,24 +1709,9 @@
   };
 
   /** 滚轮：stamp 模式下缩放签章图（中心锚定，clamp 尺寸与位置） */
+  /** 滚轮：stamp 模式下不劫持（公章固定大小，不可缩放），页面正常滚动 */
   PdfStampPicker.prototype._onWheel = function (e) {
-    if (this._options.mode !== 'stamp' || !this._stampImg) return;
-    // 普通滚轮 = 页面滚动（不劫持）；Ctrl+滚轮 = 缩放签章
-    if (!e.ctrlKey) return;
-    e.preventDefault();
-    var ratio = this._stampRatio();
-    var factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    var target = null;
-    if (this._activeId && this._sel) target = this._sel;
-    if (!target) return;
-    var nw = clamp(target.w * factor, this._options.minStampSize, this._options.maxStampSize);
-    var nh = nw / ratio;
-    var cx = target.x + target.w / 2, cy = target.y + target.h / 2;
-    var x = clamp(cx - nw / 2, 0, Math.max(0, this._displayW - nw));
-    var y = clamp(cy - nh / 2, 0, Math.max(0, this._displayH - nh));
-    this._sel = { x: x, y: y, w: nw, h: nh };
-    this._commitActive();
-    this._paint();
+    return; // 公章固定大小：滚轮（含 Ctrl+滚轮）均不缩放，页面滚动照常
   };
 
   PdfStampPicker.prototype._hitHandle = function (x, y) {
@@ -1779,9 +1764,7 @@
       var dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
       this._pinch = {
         dist: dist,
-        zoom: this._cssScale,
-        stampMode: this._options.mode === 'stamp',
-        stampW: (this._sel && this._sel.w) || this._options.stampSize
+        zoom: this._cssScale
       };
       return; // 双指模式不再走单指逻辑
     }
@@ -1896,17 +1879,8 @@
           var dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
           if (dist > 0 && this._pinch.dist > 0) {
             var ratio = dist / this._pinch.dist;
-            if (this._pinch.stampMode && this._activeId) {
-              // 签章模式：双指缩放当前章（中心锚定）
-              var nw = clamp(this._pinch.stampW * ratio, this._options.minStampSize, this._options.maxStampSize);
-              var r = this._stampRectAt(this._sel.x + this._sel.w / 2, this._sel.y + this._sel.h / 2);
-              this._sel = { x: r.x, y: r.y, w: nw, h: nw / this._stampRatio() };
-              this._commitActive();
-              this._paint();
-            } else {
-              // 页面缩放
-              this.setZoom(this._pinch.zoom * ratio);
-            }
+            // 公章固定大小：双指统一缩放页面（章在 PDF 坐标上大小不变）
+            this.setZoom(this._pinch.zoom * ratio);
           }
         }
         return;
@@ -2198,8 +2172,8 @@
       if (activeImg && !(activeImg.complete && activeImg.naturalWidth)) activeImg = null;
     }
     if (isActive && activeSt && this._options.mode === 'stamp' && activeImg) {
-      // 拖动中半透明（跟手感），放置后立即完整显示（= 已真正落定）
-      var isDragging = !!(this._drag && (this._drag.type === 'move' || this._drag.type === 'resize'));
+      // 拖动中半透明（跟手感），放置后立即完整显示；章固定大小，无缩放手柄
+      var isDragging = !!(this._drag && (this._drag.type === 'move'));
       ctx.save();
       ctx.globalAlpha = isDragging ? 0.6 : 1;
       ctx.drawImage(activeImg, x, y, w, h);
@@ -2207,9 +2181,12 @@
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, w, h);
+      // 选中外发光（替代手柄，提示可拖动不可缩放）
+      ctx.strokeStyle = hexToRgba(color, 0.3);
+      ctx.lineWidth = 5;
+      ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
       var seqIdx = this._stamps.indexOf(activeSt);
       if (seqIdx >= 0) drawSeqBadge(ctx, seqIdx + 1, x, y, color);
-      drawHandles(ctx, x, y, w, h, color);
       drawSizeLabel(this, ctx, x, y, w, h);
       return;
     }
