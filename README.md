@@ -2,6 +2,8 @@
 
 纯 JavaScript **PDF 电子签章坐标选择器** —— 单文件、零依赖、UMD 通用模块（浏览器 script / ESM / CommonJS 均可使用）。
 
+> 📦 **真实项目集成请直接看 [INTEGRATION.md](INTEGRATION.md)**（npm/原生/Vue/React 示例、CORS 排查、移动端、样式隔离）
+
 > ⚠️ 定位说明：这是**签章点坐标选择器**，不是真实盖章渲染器。输出的是签章位置坐标 + 归属用户，**不输出图片**。页面上的公章图只是拖放定位的视觉载体，放置后显示为带用户颜色的占位框。
 
 v4.1 特性：**精致 UI（图标工具栏/玻璃拟态/卡片列表/动效）** · **JSON 按用户分组（users[].stamps[]，直接对接第三方签章接口）** · 拖动内置公章放置签章点（不越界）· 多签章点 · 多用户归属 · 一键弹窗 · 统一加载 · **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
@@ -234,16 +236,20 @@ Demo 展示：签章模式（拖动公章放置）/ 容器模式（多用户多�
 
 ```
 pdf-stamp-picker/
-├── pdf-stamp-picker.js      # 库本体（单文件 ~75KB，零依赖）
+├── pdf-stamp-picker.js      # 库本体（单文件 ~98KB，零依赖）
 ├── pdf-stamp-picker.d.ts    # TypeScript 类型声明
+├── package.json             # npm 包元数据（main/module/types/exports）
+├── LICENSE                  # MIT
+├── INTEGRATION.md           # 真实项目集成指南（Vue/React/原生/弹窗/CORS）
+├── README.md                # 完整文档（含第三方接口对接示例）
 ├── demo/
-│   ├── index.html           # Demo（签章拖放/多用户/弹窗）
+│   ├── index.html           # Demo（多用户多签章/纯画布/弹窗）
 │   ├── test.pdf             # 测试 PDF（3 页，含 /Rotate 90）
 │   └── gen_test_pdf.py      # 测试 PDF 生成脚本
-├── vendor/                  # 本地化 pdf.js（可选，库会自动加载 CDN）
+├── vendor/                  # 本地化 pdf.js（可选，库会自动探测/加载 CDN）
 └── test/
     ├── coords.test.js       # 坐标转换（4 旋转 × 7 点往返）
-    └── json.test.js         # JSON 结构 / 多用户 / image 字段
+    └── json.test.js         # JSON 结构 / 多用户 / 本地候选探测
 ```
 
 ## License
