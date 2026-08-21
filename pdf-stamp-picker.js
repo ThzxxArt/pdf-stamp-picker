@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.3.1';
+  var VERSION = '4.4.0';
 
   /* ====================== 常量 ====================== */
 
@@ -157,7 +157,12 @@
     '@keyframes pspSlideDown{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}',
     '.psp-toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);background:rgba(32,33,36,.92);color:#fff;padding:9px 18px;border-radius:10px;font-size:12.5px;font-family:system-ui,sans-serif;z-index:100000;box-shadow:0 6px 24px rgba(0,0,0,.3);animation:pspToastIn .22s ease;pointer-events:none;white-space:nowrap}',
     '.psp-toast.psp-toast-hide{opacity:0;transform:translateX(-50%) translateY(8px);transition:opacity .25s ease,transform .25s ease}',
-    '@keyframes pspToastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}'
+    '@keyframes pspToastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}',
+    /* ===== 加载遮罩 ===== */
+    '.psp-loading{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(248,249,250,.75);z-index:6;gap:10px;backdrop-filter:blur(2px)}',
+    '.psp-spinner{width:34px;height:34px;border-radius:50%;border:3px solid rgba(66,133,244,.2);border-top-color:#4285f4;animation:pspSpin .8s linear infinite}',
+    '.psp-loading-txt{font-size:12px;color:#5f6368}',
+    '@keyframes pspSpin{to{transform:rotate(360deg)}}'
   ].join('');
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -313,6 +318,8 @@
     this._drag = null;
     this._stamps = [];      // 全部签章点（PDF 坐标）
     this._activeId = null;  // 活动签章 id
+    this._history = [JSON.stringify([])]; // 撤销栈（初始状态）
+    this._historyIdx = 0;   // 当前历史位置
     this._listeners = {};
     this._raf = 0;
     this._destroyed = false;
@@ -407,6 +414,14 @@
     this._canvas = canvas;
     this._overlay = overlay;
 
+    // 加载进度遮罩
+    var loading = document.createElement('div');
+    loading.className = 'psp-loading';
+    loading.style.display = 'none';
+    loading.innerHTML = '<div class="psp-spinner"></div><div class="psp-loading-txt">加载中…</div>';
+    scroll.appendChild(loading);
+    this._loadingEl = loading;
+
     if (this._options.showList) this._buildList(main);
     root.appendChild(main);
     c.appendChild(root);
@@ -430,6 +445,9 @@
       prev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
       next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
       grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18" opacity=".6"/></svg>',
+      undo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 14L4 9l5-5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9h10a6 6 0 0 1 0 12h-3" stroke-linecap="round"/></svg>',
+      redo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 14l5-5-5-5" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 9H10a6 6 0 0 0 0 12h3" stroke-linecap="round"/></svg>',
+      panel: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16" stroke-linecap="round"/><path d="M17 8h2M17 12h2M17 16h2" opacity=".6"/></svg>',
       trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></svg>'
     };
     var btn = function (icon, label, title, fn, cls) {
@@ -508,6 +526,9 @@
       if (b) b.classList.toggle('active', on);
     });
     this._gridBtn = tb.lastChild;
+    btn('undo', '撤销', '撤销上一步操作 (Ctrl+Z)', function () { self.undo(); });
+    btn('redo', '重做', '重做 (Ctrl+Shift+Z)', function () { self.redo(); });
+    btn('panel', '面板', '显示/隐藏签章列表面板', function () { self.toggleList(); });
     btn('trash', '清除', '删除全部签章点', function () { self.clear(); });
     root.appendChild(tb);
   };
@@ -582,14 +603,22 @@
     }
 
     return p.then(function (doc) {
+      self._setLoading(true, 'PDF 解析中…');
       self._pdf = doc;
       self._totalPages = doc.numPages;
       self._pdfMode = 'pdfjs';
       self._stamps = [];
       self._activeId = null;
       self._sel = null;
+      self._history = [JSON.stringify([])];
+      self._historyIdx = 0;
       self._renderList();
       return self.gotoPage(opts.pageNumber || 1);
+    }).then(function () {
+      self._setLoading(false);
+    }).catch(function (err) {
+      self._setLoading(false);
+      throw err;
     });
   };
 
@@ -788,6 +817,7 @@
     if (this._pdfMode !== 'pdfjs' || !this._pdf) return Promise.resolve();
     if (n === this._pageNumber && this._page) return Promise.resolve();
     this._pageNumber = n;
+    this._setLoading(true, '第 ' + n + ' 页渲染中…');
     return this._pdf.getPage(n).then(function (page) {
       if (self._destroyed) return;
       self._page = page;
@@ -805,8 +835,12 @@
       return self._renderPage().then(function () {
         self._updateToolbar();
         self._paint();
+        self._setLoading(false);
         self._emit('pagechange', self._pageInfo());
       });
+    }).catch(function (err) {
+      self._setLoading(false);
+      throw err;
     });
   };
 
@@ -983,6 +1017,18 @@
       if (this._users[i].id === id) return this._users[i];
     }
     return null;
+  };
+
+  /** 折叠/展开签章列表面板 */
+  PdfStampPicker.prototype.toggleList = function () {
+    if (!this._listEl) return this;
+    var collapsed = this._listEl.style.display === 'none';
+    this._listEl.style.display = collapsed ? '' : 'none';
+    var self = this;
+    requestAnimationFrame(function () {
+      self._onResize(); // 布局随面板显隐自适应
+    });
+    return this;
   };
 
   /* ---------------- 签章图片 ---------------- */
@@ -1298,17 +1344,20 @@
     return Promise.resolve(json);
   };
 
-  /** 轻提示（内置，无依赖） */
+  /** 轻提示（内置，单例复用防 DOM 堆积） */
   PdfStampPicker.prototype._toast = function (msg, ms) {
     if (typeof document === 'undefined') return;
-    var self = this;
-    var el = document.createElement('div');
-    el.className = 'psp-toast';
+    var el = document.body.querySelector('.psp-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'psp-toast';
+      document.body.appendChild(el);
+    }
     el.textContent = msg;
-    document.body.appendChild(el);
-    setTimeout(function () {
+    el.classList.remove('psp-toast-hide');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(function () {
       el.classList.add('psp-toast-hide');
-      setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 260);
     }, ms || 1600);
   };
 
@@ -1341,18 +1390,43 @@
     };
     this._stamps.push(stamp);
     this._activeId = stamp.id;
+    this._pushHistory();
     this._renderList();
     this._emit('stampadd', stamp);
+    this._checkOverlap(stamp);
     this._emit('change', this.getSelection());
     return stamp;
+  };
+
+  /** 重叠检测：新签章点与同页其他签章点矩形相交 → 警告（不阻止） */
+  PdfStampPicker.prototype._checkOverlap = function (stamp) {
+    var self = this;
+    if (!stamp || !(stamp.width > 0) || !(stamp.height > 0)) return;
+    var overlaps = [];
+    this._stamps.forEach(function (other) {
+      if (other.id === stamp.id || other.page !== stamp.page) return;
+      if (!(other.width > 0) || !(other.height > 0)) return;
+      var ox = Math.max(0, Math.min(stamp.x + stamp.width, other.x + other.width) - Math.max(stamp.x, other.x));
+      var oy = Math.max(0, Math.min(stamp.y + stamp.height, other.y + other.height) - Math.max(stamp.y, other.y));
+      if (ox > 0 && oy > 0) {
+        var u = self._userById(other.userId);
+        overlaps.push({ id: other.id, userId: other.userId, name: u ? u.name : '未知' });
+      }
+    });
+    if (overlaps.length) {
+      var names = overlaps.map(function (o) { return o.name; }).join('、');
+      this._toast('⚠️ 与「' + names + '」的签章点重叠');
+      this._emit('overlap', { stamp: stamp, overlaps: overlaps });
+    }
   };
 
   /** 删除指定签章点 */
   PdfStampPicker.prototype.removeStamp = function (id) {
     for (var i = 0; i < this._stamps.length; i++) {
-      if (this._stamps[i].id === id) {
+      if (st.id === id) {
         var removed = this._stamps.splice(i, 1)[0];
         if (this._activeId === id) { this._activeId = null; this._sel = null; }
+        this._pushHistory();
         this._renderList();
         this._paint();
         this._emit('stampremove', removed);
@@ -1370,9 +1444,11 @@
   };
 
   PdfStampPicker.prototype.clear = function () {
+    if (!this._stamps.length) return this;
     this._stamps = [];
     this._activeId = null;
     this._sel = null;
+    this._pushHistory();
     this._renderList();
     this._paint();
     this._emit('clear', {});
@@ -1380,6 +1456,52 @@
   };
 
   PdfStampPicker.prototype.clearAll = function () { return this.clear(); };
+
+  /* ---------------- 撤销/重做 ---------------- */
+
+  /** 记录当前签章状态到历史栈（**变更后**调用，push 新状态） */
+  PdfStampPicker.prototype._pushHistory = function () {
+    var snapshot = JSON.stringify(this._stamps);
+    // 若当前不在栈顶（已 undo 过），丢弃 redo 分支
+    if (this._historyIdx < this._history.length - 1) {
+      this._history = this._history.slice(0, this._historyIdx + 1);
+    }
+    this._history.push(snapshot);
+    if (this._history.length > 51) this._history.shift(); // 上限 50 步 + 初始
+    this._historyIdx = this._history.length - 1;
+  };
+
+  /** 撤销：回到上一步签章状态 */
+  PdfStampPicker.prototype.undo = function () {
+    if (this._historyIdx <= 0) return this;
+    this._historyIdx--;
+    this._restoreFromHistory();
+    return this;
+  };
+
+  /** 重做：前进到下一步签章状态 */
+  PdfStampPicker.prototype.redo = function () {
+    if (this._historyIdx >= this._history.length - 1) return this;
+    this._historyIdx++;
+    this._restoreFromHistory();
+    return this;
+  };
+
+  PdfStampPicker.prototype._restoreFromHistory = function () {
+    try {
+      var snap = JSON.parse(this._history[this._historyIdx]);
+      this._stamps = snap || [];
+    } catch (e) { return; }
+    // 恢复后：活动签章若不存在则清空
+    if (this._activeId && !this._stamps.some(function (st) { return st.id === this._activeId; }, this)) {
+      this._activeId = null;
+      this._sel = null;
+    }
+    this._renderList();
+    this._paint();
+    this._emit('change', this.getSelection());
+    this._emit('stampchange', null);
+  };
 
   /** 选中列表中的签章点并跳转页面 */
   PdfStampPicker.prototype.selectStamp = function (id) {
@@ -1420,11 +1542,17 @@
     if (!stamp || !this._sel) return;
     var sel = this.getSelection();
     if (!sel) return;
+    // 坐标有变化才记历史（避免重复 move 时堆快照）
+    var changed = Math.abs(stamp.x - sel.x) > 1e-9 || Math.abs(stamp.y - sel.y) > 1e-9 ||
+        Math.abs((stamp.width || 0) - (sel.width || 0)) > 1e-9 ||
+        Math.abs((stamp.height || 0) - (sel.height || 0)) > 1e-9;
     stamp.x = sel.x; stamp.y = sel.y;
     stamp.width = sel.width || 0;
     stamp.height = sel.height || 0;
     stamp.rotation = sel.rotation;
+    if (changed) this._pushHistory();
     this._renderList();
+    this._checkOverlap(stamp);
     this._emit('stampchange', this.getStamps().filter(function (s) { return s.id === stamp.id; })[0] || null);
   };
 
@@ -1488,8 +1616,9 @@
         var sizeTxt = (st.width > 0 && st.height > 0)
           ? fmt(st.width) + '×' + fmt(st.height) + 'pt'
           : '点选位置';
+        var noteTxt = st.note ? '<div class="psp-item-sub psp-note">📝 ' + escapeHtml(st.note) + '</div>' : '';
         main.innerHTML = '<div><span class="psp-page-badge">P' + st.page + '</span> ' + sizeTxt + '</div>' +
-                         '<div class="psp-item-sub">(' + fmt(st.x) + ', ' + fmt(st.y) + ')</div>';
+                         '<div class="psp-item-sub">(' + fmt(st.x) + ', ' + fmt(st.y) + ')</div>' + noteTxt;
         var del = document.createElement('button');
         del.className = 'psp-del';
         del.title = '删除';
@@ -1499,12 +1628,45 @@
           self.removeStamp(st.id);
         });
         item.addEventListener('click', function () { self.selectStamp(st.id); });
+        // 双击：内联编辑备注
+        item.addEventListener('dblclick', function () {
+          self._editStampNote(st, main);
+        });
         item.appendChild(idot);
         item.appendChild(main);
         item.appendChild(del);
         self._listBody.appendChild(item);
       });
     });
+  };
+
+  /** 双击列表项：内联编辑签章点备注 */
+  PdfStampPicker.prototype._editStampNote = function (st, mainEl) {
+    var self = this;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.value = st.note || '';
+    input.placeholder = '备注（如：公章/骑缝章）…';
+    input.style.cssText = 'width:100%;box-sizing:border-box;border:1px solid #4285f4;border-radius:5px;padding:3px 6px;font-size:11px;outline:none;background:#fff;color:#202124';
+    mainEl.innerHTML = '';
+    mainEl.appendChild(input);
+    input.focus();
+    input.select();
+    var done = function (save) {
+      if (save) {
+        st.note = input.value.trim();
+        self._renderList();
+        self._emit('stampchange', self.getStamps().filter(function (s) { return s.id === st.id; })[0] || null);
+      } else {
+        self._renderList();
+      }
+    };
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.stopPropagation(); done(true); }
+      if (e.key === 'Escape') { e.stopPropagation(); done(false); }
+    });
+    input.addEventListener('blur', function () { done(true); });
+    input.addEventListener('click', function (e) { e.stopPropagation(); });
   };
 
   /* ---------------- 交互 ---------------- */
@@ -1525,6 +1687,7 @@
     this._overlay.addEventListener('pointercancel', this._handlers.up);
     this._overlay.addEventListener('wheel', this._handlers.wheel, { passive: false });
     this._root.addEventListener('keydown', this._handlers.key);
+    this._pinch = null; // 双指缩放状态 {dist, zoom, mode, stampW}
     if (typeof ResizeObserver !== 'undefined') {
       this._ro = new ResizeObserver(function () { self._onResize(); });
       this._ro.observe(this._container);
@@ -1605,6 +1768,21 @@
 
   PdfStampPicker.prototype._onPointerDown = function (e) {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
+    // 双指缩放：第二个指针按下时记录起始距离
+    if (!this._ptrs) this._ptrs = {};
+    this._ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var ids = Object.keys(this._ptrs);
+    if (ids.length === 2) {
+      var p1 = this._ptrs[ids[0]], p2 = this._ptrs[ids[1]];
+      var dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+      this._pinch = {
+        dist: dist,
+        zoom: this._cssScale,
+        stampMode: this._options.mode === 'stamp',
+        stampW: (this._sel && this._sel.w) || this._options.stampSize
+      };
+      return; // 双指模式不再走单指逻辑
+    }
     var rect = this._overlay.getBoundingClientRect();
     var x = clamp(e.clientX - rect.left, 0, this._displayW);
     var y = clamp(e.clientY - rect.top, 0, this._displayH);
@@ -1706,6 +1884,32 @@
   };
 
   PdfStampPicker.prototype._onPointerMove = function (e) {
+    // 双指缩放
+    if (this._ptrs) {
+      this._ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
+      if (this._pinch) {
+        var ids = Object.keys(this._ptrs);
+        if (ids.length >= 2) {
+          var p1 = this._ptrs[ids[0]], p2 = this._ptrs[ids[1]];
+          var dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+          if (dist > 0 && this._pinch.dist > 0) {
+            var ratio = dist / this._pinch.dist;
+            if (this._pinch.stampMode && this._activeId) {
+              // 签章模式：双指缩放当前章（中心锚定）
+              var nw = clamp(this._pinch.stampW * ratio, this._options.minStampSize, this._options.maxStampSize);
+              var r = this._stampRectAt(this._sel.x + this._sel.w / 2, this._sel.y + this._sel.h / 2);
+              this._sel = { x: r.x, y: r.y, w: nw, h: nw / this._stampRatio() };
+              this._commitActive();
+              this._paint();
+            } else {
+              // 页面缩放
+              this.setZoom(this._pinch.zoom * ratio);
+            }
+          }
+        }
+        return;
+      }
+    }
     var d = this._drag;
     if (!d) {
       var rect = this._overlay.getBoundingClientRect();
@@ -1744,6 +1948,11 @@
   };
 
   PdfStampPicker.prototype._onPointerUp = function (e) {
+    // 双指抬起：清理
+    if (this._ptrs) {
+      delete this._ptrs[e.pointerId];
+      if (Object.keys(this._ptrs).length < 2) this._pinch = null;
+    }
     var d = this._drag;
     if (!d) return;
     this._drag = null;
@@ -1774,6 +1983,19 @@
   };
 
   PdfStampPicker.prototype._onKeyDown = function (e) {
+    // 撤销/重做快捷键
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      if (e.key === 'z' || e.key === 'Z') {
+        e.preventDefault();
+        if (e.shiftKey) this.redo(); else this.undo();
+        return;
+      }
+      if (e.key === 'y' || e.key === 'Y') {
+        e.preventDefault();
+        this.redo();
+        return;
+      }
+    }
     if (!this._sel && !this._activeId) return;
     var step = e.shiftKey ? 10 : 1;
     var handled = true;
@@ -2028,6 +2250,16 @@
   PdfStampPicker.prototype._updateToolbar = function () {
     if (this._zoomLabel) this._zoomLabel.textContent = Math.round(this._cssScale * 100) + '%';
     if (this._pageLabel) this._pageLabel.textContent = this._pageNumber + ' / ' + this._totalPages;
+  };
+
+  /** 显示/隐藏加载遮罩 */
+  PdfStampPicker.prototype._setLoading = function (show, txt) {
+    if (!this._loadingEl) return;
+    this._loadingEl.style.display = show ? 'flex' : 'none';
+    if (txt) {
+      var t = this._loadingEl.querySelector('.psp-loading-txt');
+      if (t) t.textContent = txt;
+    }
   };
 
   PdfStampPicker.prototype._loadUrl = function (url) {

@@ -168,6 +168,11 @@ export default class PdfStampPicker {
   getStamps(): (StampJSON & { user: { id: string; name: string; color: string } | null })[];
   getStampsByUser(userId: string): (StampJSON & { user: { id: string; name: string; color: string } | null })[];
   getActiveStamp(): (StampJSON & { user: { id: string; name: string; color: string } | null }) | null;
+  /** 撤销/重做 */
+  undo(): this;
+  redo(): this;
+  /** 折叠/展开签章列表面板 */
+  toggleList(): this;
   addStamp(sel: { x: number; y: number; width?: number; height?: number; page?: number; userId?: string; note?: string }): StampJSON;
   removeStamp(id: string): StampJSON | null;
   selectStamp(id: string): this;
