@@ -162,6 +162,7 @@ export default class PdfStampPicker {
   setCurrentUser(userId: string): this;
   getCurrentUser(): PickerUser | null;
   addUser(user: PickerUser): this;
+  removeUser(userId: string): this;
 
   /** 签章点管理 */
   getStamps(): (StampJSON & { user: { id: string; name: string; color: string } | null })[];

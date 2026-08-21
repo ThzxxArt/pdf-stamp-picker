@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.2.0';
+  var VERSION = '4.2.1';
 
   /* ====================== 常量 ====================== */
 
@@ -293,6 +293,8 @@
     injectStyles();
     this._buildDOM();
     this._bindEvents();
+    // 同步初始模式（修复 options.mode 未生效：按钮 active 状态 + stamp 模式预生成签章图）
+    try { this.setMode(this._options.mode); } catch (e) { /* ignore */ }
     this._emit('ready', {});
   }
 
@@ -417,7 +419,6 @@
     this._btnPoint = btn('point', '定位', '点选模式', function () { self.setMode('point'); });
     this._btnRect = btn('rect', '框选', '框选模式', function () { self.setMode('rect'); });
     this._btnStamp = btn('stamp', '签章', '拖动签章图片放置（滚轮缩放）', function () { self.setMode('stamp'); });
-    this._btnRect.classList.add('active');
     sep();
 
     // 当前签章图缩略图（内置公章按用户名生成，只读展示）
@@ -439,7 +440,7 @@
 
     btn('open', '打开', '选择本地 PDF 文件', function () { self._fileInput.click(); });
     btn('url', 'URL', '从地址加载 PDF / 文件流接口', function () { self._urlbar.classList.toggle('open'); });
-    if (this._users.length > 1) {
+    {
       var usel = document.createElement('select');
       this._users.forEach(function (u) {
         var o = document.createElement('option');
@@ -885,9 +886,53 @@
   };
   PdfStampPicker.prototype.addUser = function (user) {
     if (!user || !user.id) throw new Error('[PdfStampPicker] addUser 需要 {id, name}');
+    if (this._userById(user.id)) return this;
     var u = { id: user.id, name: user.name, color: user.color || STAMP_COLORS[this._users.length % STAMP_COLORS.length] };
     this._users.push(u);
+    this._rebuildUserSelect();
     return this;
+  };
+
+  /** 移除签署方（其签章点一并删除）；不可移除当前用户 */
+  PdfStampPicker.prototype.removeUser = function (userId) {
+    var idx = -1;
+    for (var i = 0; i < this._users.length; i++) {
+      if (this._users[i].id === userId) { idx = i; break; }
+    }
+    if (idx < 0) return this;
+    if (this._users[idx].id === this._currentUserId) {
+      throw new Error('[PdfStampPicker] 不能移除当前签章用户');
+    }
+    this._users.splice(idx, 1);
+    this._stamps = this._stamps.filter(function (st) { return st.userId !== userId; });
+    if (this._activeId && !this._stamps.some(function (st) { return st.id === this._activeId; }, this)) {
+      this._activeId = null;
+      this._sel = null;
+    }
+    this._rebuildUserSelect();
+    this._renderList();
+    this._paint();
+    return this;
+  };
+
+  /** 重建工具栏用户下拉（动态增删后同步） */
+  PdfStampPicker.prototype._rebuildUserSelect = function () {
+    if (!this._userSelect || !this._userSelect.parentNode) return;
+    var self = this;
+    var parent = this._userSelect.parentNode;
+    var old = this._userSelect;
+    var usel = document.createElement('select');
+    this._users.forEach(function (u) {
+      var o = document.createElement('option');
+      o.value = u.id; o.textContent = u.name;
+      if (u.id === self._currentUserId) o.selected = true;
+      usel.appendChild(o);
+    });
+    usel.title = '当前签章用户';
+    usel.className = old.className;
+    usel.addEventListener('change', function () { self.setCurrentUser(usel.value); });
+    parent.replaceChild(usel, old);
+    this._userSelect = usel;
   };
 
   PdfStampPicker.prototype._userById = function (id) {

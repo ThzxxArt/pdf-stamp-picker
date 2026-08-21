@@ -46,11 +46,11 @@
 <main>
   <div id="stage"></div>
   <aside>
-    <h2>用户切换 <span class="badge">新</span></h2>
-    <div class="users" id="users">
-      <button data-id="u1" class="active"><span class="dot" style="background:#4285f4"></span>甲方</button>
-      <button data-id="u2"><span class="dot" style="background:#ea4335"></span>乙方</button>
-      <button data-id="u3"><span class="dot" style="background:#34a853"></span>丙方</button>
+    <h2>签署方管理 <span class="badge">可动态增删</span></h2>
+    <div class="users" id="users"></div>
+    <div style="display:flex;gap:6px;padding:0 12px 8px">
+      <input id="new-user" type="text" placeholder="输入公司/签署方名称，回车添加" style="flex:1;background:#2a2d33;color:#e8eaed;border:1px solid #3c4043;border-radius:6px;padding:5px 8px;font-size:11px;outline:none">
+      <button id="btn-adduser" style="background:#34a853;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">添加</button>
     </div>
     <h2>实时 JSON 输出</h2>
     <div id="info"></div>
@@ -95,6 +95,63 @@ const USERS = [
 
 let picker = null;
 
+// 动态渲染签署方按钮列表
+function renderUsers() {
+  const wrap = document.getElementById('users');
+  wrap.innerHTML = '';
+  const cu = picker.getCurrentUser();
+  picker._users.forEach(u => {
+    const btn = document.createElement('button');
+    btn.dataset.id = u.id;
+    btn.classList.toggle('active', u.id === cu.id);
+    btn.style.borderColor = u.id === cu.id ? u.color : '#5f6368';
+    btn.innerHTML = `<span class="dot" style="background:${u.color}"></span>${u.name}`;
+    btn.title = u.id === cu.id ? '当前签署方' : '点击切换';
+    // 删除按钮（当前用户不可删）
+    if (u.id !== cu.id) {
+      const del = document.createElement('span');
+      del.textContent = ' ×';
+      del.style.cssText = 'cursor:pointer;color:#b0b4ba;margin-left:4px;font-size:12px';
+      del.title = '移除该签署方';
+      del.addEventListener('click', e => {
+        e.stopPropagation();
+        picker.removeUser(u.id);
+        renderUsers();
+        renderJSON();
+        info.textContent = `已移除签署方「${u.name}」及其签章点`;
+      });
+      btn.appendChild(del);
+    }
+    btn.addEventListener('click', () => {
+      picker.setCurrentUser(u.id);
+      renderUsers();
+      info.textContent = `当前签章用户: ${picker.getCurrentUser().name}`;
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+// 添加签署方
+function addUserByName(name) {
+  name = (name || '').trim();
+  if (!name) return;
+  const id = 'u_' + Date.now().toString(36);
+  picker.addUser({ id, name });
+  picker.setCurrentUser(id);
+  renderUsers();
+  info.textContent = `已添加签署方「${name}」，当前为其设置签章点`;
+}
+document.getElementById('btn-adduser').addEventListener('click', () => {
+  addUserByName(document.getElementById('new-user').value);
+  document.getElementById('new-user').value = '';
+});
+document.getElementById('new-user').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    addUserByName(document.getElementById('new-user').value);
+    document.getElementById('new-user').value = '';
+  }
+});
+
 function renderJSON() {
   if (!picker) return;
   const json = picker.toJSON();
@@ -102,9 +159,6 @@ function renderJSON() {
   const total = json.users.reduce((n, g) => n + g.stamps.length, 0);
   const signed = json.users.filter(g => g.stamps.length > 0).map(g => g.user.name).join('、') || '无';
   info.textContent = `文档: ${json.document.name || '(未命名)'} · ${json.document.pages}页 · 签章点 ${total} 个（${signed}）`;
-  // 高亮当前用户
-  const cu = picker.getCurrentUser();
-  document.querySelectorAll('#users button').forEach(b => b.classList.toggle('active', b.dataset.id === cu.id));
 }
 
 function initContainerMode() {
@@ -128,17 +182,18 @@ function initContainerMode() {
   // 远程静态地址加载（测试 PDF）
   picker.load('test.pdf').then(() => {
     renderJSON();
+    renderUsers();
     // 预生成当前用户（甲方）的内置公章
     return picker._ensureStampImage();
   }).then(() => {
-    info.textContent = '已加载 test.pdf · 切换用户后公章名字自动变化 · 签章模式拖动放置（不越界）';
+    info.textContent = '已加载 test.pdf · 可添加/移除签署方 · 签章模式拖动放置（不越界）';
   }).catch(e => {
     info.textContent = '加载失败: ' + e.message;
     console.error(e);
   });
 }
 
-// 用户切换
+// 用户切换（委托）
 document.getElementById('users').addEventListener('click', e => {
   const btn = e.target.closest('button');
   if (!btn || !picker) return;
@@ -241,6 +296,7 @@ function initCanvasMode() {
   picker.on('error', e => { info.textContent = '错误: ' + e.message; console.error(e); });
   picker.setPage({ canvas: cv, width: W, height: H, rotation: 0, pageNumber: 1, totalPages: 1, name: 'canvas合同.pdf' });
   picker._ensureStampImage().then(() => {
+    renderUsers();
     info.textContent = '纯画布模式：宿主渲染 canvas，库只做坐标选择（setPage）';
     renderJSON();
   });

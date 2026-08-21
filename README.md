@@ -141,11 +141,21 @@ const signFlow = {
 
 > 坐标约定：**PDF 原生坐标（pt，原点左下）**，已自动补偿页面旋转（0/90/180/270）。第三方接口若要求 mm 或右上原点，可换算：`mm = pt × 25.4/72`；右上原点 `y2 = pageHeight - y`。
 
-## 多用户签章
+## 多用户签章（签署方动态管理）
 
 ```js
-picker.addUser({ id: 'c', name: '丙方', color: '#34a853' });
-picker.setCurrentUser('c');   // 后续新增的签章归属丙方
+// 业务侧传入真实签署方列表（如合同里的各公司）
+const picker = new PdfStampPicker('#stage', {
+  users: [
+    { id: 'a', name: '甲方公司', color: '#4285f4' },
+    { id: 'b', name: '乙方公司', color: '#ea4335' }
+  ]
+});
+
+// 动态增删签署方
+picker.addUser({ id: 'c', name: '丙方公司', color: '#34a853' });
+picker.removeUser('b');               // 移除乙方及其签章点
+picker.setCurrentUser('c');           // 后续新增的签章归属丙方
 ```
 
 - 每个签章点在页面上以**用户颜色**边框标识，列表按用户着色
