@@ -28,7 +28,17 @@ v4.1 特性：**精致 UI（图标工具栏/玻璃拟态/卡片列表/动效）*
 </script>
 ```
 
-> 库会自动注入全部 HTML/CSS、自动加载 pdf.js（可用 `pdfjsUrl` 配置本地地址）、自动生成**内置红色公章**（公章上的名字 = 当前用户名，切换用户自动更新）。宿主零样式代码。
+> 库会自动注入全部 HTML/CSS、自动加载 pdf.js、自动生成**内置红色公章**（公章上的名字 = 当前用户名，切换用户自动更新）。宿主零样式代码。
+
+### pdf.js 加载策略（v4.2 起自动探测）
+
+加载优先级：**传入 `pdfjs` 实例 > 全局 `window.pdfjsLib` > 配置 `pdfjsUrl` > 自动探测本地 > CDN 兜底**。
+
+零配置时自动探测本地路径（按顺序）：
+1. 库文件同目录 `vendor/pdf.min.js`
+2. 宿主页面同目录 `vendor/pdf.min.js` / `../vendor/pdf.min.js` / `libs/pdf.min.js`
+
+全部找不到才回退 CDN（cdnjs）。所以项目里只要把 `pdf-stamp-picker.js` 和 `vendor/` 放一起，**离线/内网环境零配置可用**。worker 自动按 `pdf.min.js → pdf.worker.min.js` 规则推断。
 
 ## ✨ 拖动公章放置（签章模式）
 
@@ -162,7 +172,7 @@ picker.setCurrentUser('c');   // 后续新增的签章归属丙方
 | `stampImage` | 内置公章 | 可选自定义签章图（不配则内置公章按用户名生成） |
 | `stampSize` | `120` | 签章图显示基准宽度 px |
 | `minStampSize` / `maxStampSize` | `24` / `480` | 签章图缩放范围 |
-| `pdfjsUrl` | CDN | pdf.js 自动加载地址（可指本地/内网） |
+| `pdfjsUrl` | 自动探测 | 显式指定 pdf.js 地址（默认自动探测本地 vendor → CDN 兜底） |
 | `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载） |
 
 ### 方法

@@ -190,6 +190,8 @@ export default class PdfStampPicker {
 
   /** 一键弹窗，确认返回 toJSON()，取消返回 null */
   static openModal(config: OpenModalConfig): Promise<PickerJSON | null>;
-  /** 预加载 pdf.js */
+  /** 预加载 pdf.js（指定地址） */
   static loadPdfJs(url?: string): Promise<unknown>;
+  /** 自动探测加载 pdf.js（本地 vendor/libs → CDN 兜底） */
+  static loadPdfJsAuto(): Promise<unknown>;
 }

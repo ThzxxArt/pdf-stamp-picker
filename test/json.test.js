@@ -1,8 +1,9 @@
-// v4 单元测试：JSON 按用户分组结构 / 多用户多签章归属 / 扁平版兼容 / 旋转归一化
+// v4 单元测试：JSON 按用户分组结构 / 多用户多签章归属 / 扁平版兼容 / 旋转归一化 / 本地候选探测
 const assert = require('assert');
-const { _internals, version } = require('/var/minis/workspace/pdf-stamp-picker/pdf-stamp-picker.js');
+const PdfStampPickerModule = require('/var/minis/workspace/pdf-stamp-picker/pdf-stamp-picker.js');
+const { _internals, version } = PdfStampPickerModule;
 
-assert.strictEqual(version, '4.1.0');
+assert.strictEqual(version, '4.2.0');
 
 const { buildJSON, buildFlatJSON, genId, normalizeRotation } = _internals;
 
@@ -96,4 +97,28 @@ assert.strictEqual(jsonNoUsers.users[0].stamps.length, 1);
 const withImg = buildJSON(doc, [{ id: 'b', userId: 'u1', page: 1, x: 1, y: 2, width: 3, height: 4, rotation: 0, note: '', createdAt: '', image: { src: 'data:...' } }], users);
 assert.strictEqual('image' in withImg.users[0].stamps[0], false);
 
-console.log('=== v4 单测全部通过（按用户分组/多用户多签章/扁平兼容/无图片） ===');
+// --- v4.2: 本地 pdf.js 候选路径探测 ---
+const { _localCandidates } = PdfStampPickerModule;
+// 布局A: 库文件在 /libs/, 页面在 /apps/contract/ → 优先库目录 vendor/
+const c1 = _localCandidates('https://a.com/apps/contract/index.html', 'https://a.com/libs/pdf-stamp-picker.js');
+assert.deepStrictEqual(c1, [
+  'https://a.com/libs/vendor/pdf.min.js',
+  'https://a.com/apps/contract/vendor/pdf.min.js',
+  'https://a.com/apps/contract/../vendor/pdf.min.js',
+  'https://a.com/apps/contract/libs/pdf.min.js'
+]);
+// 布局B: 页面目录 URL(以 / 结尾) 不应被截断
+const c2 = _localCandidates('https://a.com/apps/contract/', null);
+assert.deepStrictEqual(c2, [
+  'https://a.com/apps/contract/vendor/pdf.min.js',
+  'https://a.com/apps/contract/../vendor/pdf.min.js',
+  'https://a.com/apps/contract/libs/pdf.min.js'
+]);
+// 布局C: 带 query/hash 的页面 URL
+const c3 = _localCandidates('https://a.com/apps/index.html?lang=zh#top', null);
+assert.strictEqual(c3[0], 'https://a.com/apps/vendor/pdf.min.js');
+// 去重: 库与页面同目录时 vendor 只出现一次
+const c4 = _localCandidates('https://a.com/apps/index.html', 'https://a.com/apps/pdf-stamp-picker.js');
+assert.strictEqual(c4.filter(p => p === 'https://a.com/apps/vendor/pdf.min.js').length, 1);
+
+console.log('=== v4 单测全部通过（按用户分组/多用户多签章/扁平兼容/无图片/本地候选探测） ===');

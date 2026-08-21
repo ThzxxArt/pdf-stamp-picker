@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.1.0';
+  var VERSION = '4.2.0';
 
   /* ====================== 常量 ====================== */
 
@@ -603,7 +603,7 @@
     });
   };
 
-  /** 确保 pdfjsLib 可用（自动注入 script） */
+  /** 确保 pdfjsLib 可用（优先级：传入实例 > 全局 > 配置URL > 本地探测 > CDN） */
   PdfStampPicker.prototype._ensurePdfjs = function () {
     var self = this;
     var pdfjs = this._options.pdfjs || (typeof window !== 'undefined' && window.pdfjsLib) || null;
@@ -612,7 +612,10 @@
       return Promise.resolve(pdfjs);
     }
     if (this._pdfjsPromise) return this._pdfjsPromise;
-    this._pdfjsPromise = PdfStampPicker.loadPdfJs(this._options.pdfjsUrl).then(function (lib) {
+    this._pdfjsPromise = (this._options.pdfjsUrl
+      ? PdfStampPicker.loadPdfJs(this._options.pdfjsUrl)   // 用户显式指定
+      : PdfStampPicker.loadPdfJsAuto()                      // 本地探测 → CDN 兜底
+    ).then(function (lib) {
       self._options.pdfjs = lib;
       return lib;
     });
@@ -642,6 +645,72 @@
       s.onerror = function () { reject(new Error('[PdfStampPicker] pdf.js 脚本加载失败: ' + src)); };
       document.head.appendChild(s);
     });
+  };
+
+  /**
+   * 本地 pdf.js 候选路径（纯函数，可单测）。
+   * 优先库文件所在目录 vendor/，再页面同目录 vendor/、../vendor/、libs/。
+   * @param {string} pageHref 页面完整 URL
+   * @param {string|null} scriptSrc 库脚本自身 src（document.currentScript）
+   * @returns {string[]}
+   */
+  PdfStampPicker._localCandidates = function (pageHref, scriptSrc) {
+    function dirOf(url) {
+      if (!url) return null;
+      var base = String(url).split('#')[0].split('?')[0];
+      if (base.slice(-1) === '/') return base;
+      var m = base.match(/^(.*\/)[^/]*$/);
+      return m ? m[1] : null;
+    }
+    var out = [];
+    if (scriptSrc) {
+      var d = dirOf(scriptSrc);
+      if (d) out.push(d + 'vendor/pdf.min.js');
+    }
+    if (pageHref) {
+      var pd = dirOf(pageHref);
+      if (pd) {
+        out.push(pd + 'vendor/pdf.min.js');
+        out.push(pd + '../vendor/pdf.min.js');
+        out.push(pd + 'libs/pdf.min.js');
+      }
+    }
+    var seen = {}, uniq = [];
+    out.forEach(function (p) { if (!seen[p]) { seen[p] = 1; uniq.push(p); } });
+    return uniq;
+  };
+
+  /**
+   * 自动探测加载 pdf.js：依次尝试本地候选路径，全部失败回退 CDN。
+   */
+  PdfStampPicker.loadPdfJsAuto = function () {
+    if (typeof window === 'undefined') return Promise.reject(new Error('[PdfStampPicker] 仅支持浏览器环境'));
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    var scriptSrc = (document.currentScript && document.currentScript.src) || null;
+    var candidates = PdfStampPicker._localCandidates(window.location.href, scriptSrc);
+    var idx = 0;
+    var tryNext = function () {
+      if (idx >= candidates.length) {
+        return PdfStampPicker.loadPdfJs(); // CDN 兜底
+      }
+      var src = candidates[idx++];
+      return new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.onload = function () {
+          if (window.pdfjsLib) {
+            var workerSrc = src.replace(/pdf(\.min)?\.js$/, 'pdf.worker$1.js');
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.pdfjsLib.GlobalWorkerOptions.workerSrc || workerSrc;
+            resolve(window.pdfjsLib);
+          } else {
+            reject(new Error('no pdfjsLib: ' + src));
+          }
+        };
+        s.onerror = function () { reject(new Error('load fail: ' + src)); };
+        document.head.appendChild(s);
+      }).catch(tryNext);
+    };
+    return tryNext();
   };
 
   /** 兼容 v1：直接传入 pdfjs proxy */
@@ -2126,6 +2195,7 @@
 
   PdfStampPicker.version = VERSION;
   PdfStampPicker._internals = { buildJSON: buildJSON, buildFlatJSON: buildFlatJSON, genId: genId, normalizeRotation: normalizeRotation };
+  PdfStampPicker._localCandidates = PdfStampPicker._localCandidates || null; // 由下方赋值（保持单测可访问）
 
   return PdfStampPicker;
 });
