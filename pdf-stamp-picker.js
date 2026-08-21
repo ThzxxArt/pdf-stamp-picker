@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.2';
+  var VERSION = '4.7.3';
 
   /* ====================== 常量 ====================== */
 
@@ -992,6 +992,14 @@
       try { this._renderTask.cancel(); } catch (e) { /* ignore */ }
       this._renderTask = null;
     }
+    // 保存旧画面到离屏 canvas（渲染失败时恢复，防页面空白）
+    var oldCanvas = null;
+    if (this._canvas.width > 0 && this._canvas.height > 0) {
+      oldCanvas = document.createElement('canvas');
+      oldCanvas.width = this._canvas.width;
+      oldCanvas.height = this._canvas.height;
+      try { oldCanvas.getContext('2d').drawImage(this._canvas, 0, 0); } catch (e) { oldCanvas = null; }
+    }
     var dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
     var renderScale = this._cssScale * Math.max(1, dpr);
     var viewport = this._page.getViewport({ scale: renderScale });
@@ -1005,6 +1013,14 @@
       // 渲染被取消是预期行为（翻页/缩放/销毁），不视为错误
       if (self._renderTask === task) self._renderTask = null;
       if (err && err.name === 'RenderingCancelledException') return;
+      // 渲染失败（非取消）：恢复旧画面防空白
+      if (oldCanvas) {
+        try {
+          var ctx = self._canvas.getContext('2d');
+          ctx.clearRect(0, 0, self._canvas.width, self._canvas.height);
+          ctx.drawImage(oldCanvas, 0, 0);
+        } catch (e) { /* ignore */ }
+      }
       throw err;
     });
   };
@@ -1131,7 +1147,10 @@
     var collapsed = this._listEl.style.display === 'none';
     this._listEl.style.display = collapsed ? '' : 'none';
     var self = this;
-    requestAnimationFrame(function () {
+    // rAF 去重：连续 toggle（如快速点击）只触发一次重排重渲染，避免多次 _renderPage 互相 cancel 导致空白
+    if (this._resizeRaf) cancelAnimationFrame(this._resizeRaf);
+    this._resizeRaf = requestAnimationFrame(function () {
+      self._resizeRaf = 0;
       self._onResize(); // 布局随面板显隐自适应
     });
     return this;
@@ -1602,7 +1621,7 @@
   /** 删除指定签章点 */
   PdfStampPicker.prototype.removeStamp = function (id) {
     for (var i = 0; i < this._stamps.length; i++) {
-      if (st.id === id) {
+      if (this._stamps[i].id === id) {
         var removed = this._stamps.splice(i, 1)[0];
         if (this._activeId === id) { this._activeId = null; this._sel = null; }
         this._pushHistory();
@@ -2524,6 +2543,7 @@
   PdfStampPicker.prototype.destroy = function () {
     this._destroyed = true;
     if (this._raf) cancelAnimationFrame(this._raf);
+    if (this._resizeRaf) cancelAnimationFrame(this._resizeRaf);
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
     if (!this._ro) window.removeEventListener('resize', this._handlers.resize);
     // 显式解绑事件监听（防 destroy 后仍持有实例引用时泄漏）
