@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.4.0';
+  var VERSION = '4.4.1';
 
   /* ====================== 常量 ====================== */
 
@@ -580,7 +580,9 @@
    *   File | ArrayBuffer | Uint8Array | string(远程静态 URL) |
    *   { url, method?, headers?, body? }(PDF 文件流接口) | pdfjs document proxy
    * @param {*} source
-   * @param {Object} [opts] { pageNumber }
+   * @param {Object} [opts] { pageNumber, mode }
+   * @param {number} [opts.pageNumber] 加载后跳转的页码
+   * @param {'point'|'rect'|'stamp'} [opts.mode] 加载后切换的坐标选择模式（可选性加载）
    */
   PdfStampPicker.prototype.load = function (source, opts) {
     var self = this;
@@ -615,6 +617,10 @@
       self._renderList();
       return self.gotoPage(opts.pageNumber || 1);
     }).then(function () {
+      // 加载完成后按需切换选择模式（可选性加载）
+      if (opts.mode && self._options.mode !== opts.mode) {
+        self.setMode(opts.mode);
+      }
       self._setLoading(false);
     }).catch(function (err) {
       self._setLoading(false);
@@ -2293,6 +2299,9 @@
    * @param {string} [config.title='选择签章位置']
    * @param {string} [config.confirmText='确认']
    * @param {string} [config.cancelText='取消']
+   * @param {number|string} [config.width] 弹窗宽度（数字=px 或 CSS 值如 '90%'），默认 min(94vw,1180px)
+   * @param {number|string} [config.height] 弹窗高度（数字=px 或 CSS 值），默认 min(90vh,820px)
+   * @param {'point'|'rect'|'stamp'} [config.mode] 弹窗坐标选择模式（等价于 pickerOptions.mode，更直观）
    * @param {Array} [config.users] 用户列表
    * @param {string} [config.currentUser]
    * @param {boolean} [config.closeOnBackdrop=true] 点遮罩关闭
@@ -2310,6 +2319,9 @@
       mask.className = 'psp-modal-mask';
       var modal = document.createElement('div');
       modal.className = 'psp-modal';
+      // 弹窗宽高可配置（数字=px，字符串=任意 CSS 值如 '90%'/'640px'）
+      if (config.width != null) modal.style.width = (typeof config.width === 'number') ? config.width + 'px' : config.width;
+      if (config.height != null) modal.style.height = (typeof config.height === 'number') ? config.height + 'px' : config.height;
       var head = document.createElement('div');
       head.className = 'psp-modal-head';
       var title = document.createElement('h2');
@@ -2340,7 +2352,8 @@
       var settled = false;
       var picker = new PdfStampPicker(body, Object.assign({}, config.pickerOptions, {
         users: config.users,
-        currentUser: config.currentUser
+        currentUser: config.currentUser,
+        mode: config.mode !== undefined ? config.mode : (config.pickerOptions && config.pickerOptions.mode)
       }));
       if (config.source) {
         picker.load(config.source).catch(function (err) {

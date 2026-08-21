@@ -66,13 +66,33 @@ const json = await PdfStampPicker.openModal({
   source: 'https://api.example.com/pdf/contract/123',  // 或 File / ArrayBuffer / {url,headers}
   title: '选择签章位置',
   users: [{ id: 'a', name: '甲方' }, { id: 'b', name: '乙方' }],
-  requireStamp: true,             // 必须有签章点才能确认
-  pickerOptions: { mode: 'stamp' } // 直接进签章模式
+  width: 900,             // 弹窗宽度（数字=px，或 '90%' 字符串），默认 min(94vw,1180px)
+  height: 700,            // 弹窗高度（数字=px，或 '70%'），默认 min(90vh,820px)
+  mode: 'stamp',          // 弹窗坐标选择模式（point/rect/stamp），等价 pickerOptions.mode
+  requireStamp: true,     // 必须有签章点才能确认
 });
 // json → { document: {...}, users: [{user, stamps}] }，取消 → null
 ```
 
-`openModal` 全部参数：`source` `title` `users` `currentUser` `confirmText` `cancelText` `requireStamp` `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（透传给选择器）。
+`openModal` 全部参数：`source` `title` `users` `currentUser` **`width` `height`（弹窗尺寸）** **`mode`（选择模式）** `confirmText` `cancelText` `requireStamp` `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（透传给选择器）。
+
+## 坐标选择模式的可选性加载
+
+三种模式（`point` 点选 / `rect` 框选 / `stamp` 签章）**在初始化或加载时即可指定**，不用等加载完再切换：
+
+```js
+// ① 构造时指定（容器模式 / 弹窗均支持）
+const picker = new PdfStampPicker('#stage', { mode: 'stamp' });
+
+// ② 加载时指定（加载完成后自动切换）
+await picker.load('https://x.com/a.pdf', { mode: 'rect', pageNumber: 2 });
+
+// ③ 弹窗顶层指定
+PdfStampPicker.openModal({ source: '...', mode: 'point' });
+
+// ④ 运行时切换（仍可用）
+picker.setMode('stamp');
+```
 
 ## 统一加载（load source 支持 5 种）
 

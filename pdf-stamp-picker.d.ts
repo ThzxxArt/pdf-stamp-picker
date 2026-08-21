@@ -120,6 +120,12 @@ export interface OpenModalConfig extends Partial<PdfStampPickerOptions> {
   source?: PdfSource;
   /** 弹窗标题 */
   title?: string;
+  /** 弹窗宽度：数字=px 或 CSS 值（如 '90%'） */
+  width?: number | string;
+  /** 弹窗高度：数字=px 或 CSS 值（如 '70%'） */
+  height?: number | string;
+  /** 弹窗坐标选择模式（等价 pickerOptions.mode） */
+  mode?: PickerMode;
   confirmText?: string;
   cancelText?: string;
   /** 点遮罩关闭（默认 true） */
@@ -137,7 +143,7 @@ export default class PdfStampPicker {
   static version: string;
 
   /** 统一加载：File / ArrayBuffer / URL / 流接口配置 / pdfjs proxy */
-  load(source: PdfSource, opts?: { pageNumber?: number }): Promise<void>;
+  load(source: PdfSource, opts?: { pageNumber?: number; mode?: PickerMode }): Promise<void>;
   /** 兼容 v1 的 PDF.js 集成模式 */
   loadPDF(source: PdfSource, opts?: { pageNumber?: number }): Promise<void>;
   /** 纯画布模式 */
