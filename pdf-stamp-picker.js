@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.2.3';
+  var VERSION = '4.2.4';
 
   /* ====================== 常量 ====================== */
 
@@ -1502,26 +1502,22 @@
   /** 滚轮：stamp 模式下缩放签章图（中心锚定，clamp 尺寸与位置） */
   PdfStampPicker.prototype._onWheel = function (e) {
     if (this._options.mode !== 'stamp' || !this._stampImg) return;
+    // 普通滚轮 = 页面滚动（不劫持）；Ctrl+滚轮 = 缩放签章
+    if (!e.ctrlKey) return;
     e.preventDefault();
     var ratio = this._stampRatio();
     var factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    var target = null, isActive = false;
-    if (this._activeId && this._sel) { target = this._sel; isActive = true; }
-    else if (this._hover) target = this._hover;
+    var target = null;
+    if (this._activeId && this._sel) target = this._sel;
     if (!target) return;
     var nw = clamp(target.w * factor, this._options.minStampSize, this._options.maxStampSize);
     var nh = nw / ratio;
     var cx = target.x + target.w / 2, cy = target.y + target.h / 2;
     var x = clamp(cx - nw / 2, 0, Math.max(0, this._displayW - nw));
     var y = clamp(cy - nh / 2, 0, Math.max(0, this._displayH - nh));
-    if (isActive) {
-      this._sel = { x: x, y: y, w: nw, h: nh };
-      this._commitActive();
-      this._paint();
-    } else {
-      this._hover = { x: x, y: y, w: nw, h: nh };
-      this._paint();
-    }
+    this._sel = { x: x, y: y, w: nw, h: nh };
+    this._commitActive();
+    this._paint();
   };
 
   PdfStampPicker.prototype._hitHandle = function (x, y) {
@@ -1668,14 +1664,7 @@
     if (!d) {
       var rect = this._overlay.getBoundingClientRect();
       var hx = e.clientX - rect.left, hy = e.clientY - rect.top;
-      if (this._options.mode === 'stamp' && this._stampImg && this._displayW > 0) {
-        // 跟随鼠标的预览（clamp 不出边界）
-        var ph = this._stampRectAt(hx, hy);
-        if (!this._hover || this._hover.x !== ph.x || this._hover.y !== ph.y) {
-          this._hover = ph;
-          this._schedulePaint();
-        }
-      }
+      // 无 hover 预览：鼠标移入不显示图片，点击/拖动才放置
       var h = (this._options.mode === 'rect' && this._sel) ? this._hitHandle(hx, hy) : null;
       this._overlay.style.cursor = h ? handleCursor(h) : (this._options.mode === 'stamp' ? 'copy' : 'crosshair');
       return;
@@ -1783,9 +1772,6 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, this._displayW, this._displayH);
     if (this._options.showGrid) this._drawGrid(ctx);
-    if (this._options.mode === 'stamp' && this._hover && !this._drag) {
-      this._drawStampImage(ctx, this._hover, this._hoverColor(), 0.55);
-    }
     this._drawStamps(ctx);
     if (this._sel && this._activeId === null && this._drag) {
       // 新绘制的临时选区（尚未提交）
@@ -1826,11 +1812,6 @@
       ctx.moveTo(0, sy); ctx.lineTo(this._displayW, sy);
     }
     ctx.stroke();
-  };
-
-  PdfStampPicker.prototype._hoverColor = function () {
-    var u = this._userById(this._currentUserId);
-    return u ? u.color : '#4285f4';
   };
 
   /** 签章图片缓存（按 src），加载完成后自动重绘 */
@@ -1939,8 +1920,10 @@
       if (activeImg && !(activeImg.complete && activeImg.naturalWidth)) activeImg = null;
     }
     if (isActive && activeSt && this._options.mode === 'stamp' && activeImg) {
+      // 拖动中半透明（跟手感），放置后立即完整显示（= 已真正落定）
+      var isDragging = !!(this._drag && (this._drag.type === 'move' || this._drag.type === 'resize'));
       ctx.save();
-      ctx.globalAlpha = 0.65;
+      ctx.globalAlpha = isDragging ? 0.6 : 1;
       ctx.drawImage(activeImg, x, y, w, h);
       ctx.restore();
       ctx.strokeStyle = color;
