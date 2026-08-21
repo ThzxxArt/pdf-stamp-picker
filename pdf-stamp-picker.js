@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.3';
+  var VERSION = '4.7.4';
 
   /* ====================== 常量 ====================== */
 
@@ -620,6 +620,10 @@
       self._pdf = doc;
       self._totalPages = doc.numPages;
       self._pdfMode = 'pdfjs';
+      // ★ 换文档后必须重置页面状态：否则 gotoPage(1) 短路（_pageNumber===1 且 _page 存在）
+      // 导致新 PDF 第一页不渲染、页码不刷新（显示旧 PDF 内容/旧总页数）
+      self._page = null;
+      self._pageNumber = 0;
       self._stamps = [];
       self._activeId = null;
       self._sel = null;
