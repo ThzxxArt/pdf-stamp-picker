@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.2.2';
+  var VERSION = '4.2.3';
 
   /* ====================== 常量 ====================== */
 
@@ -785,9 +785,13 @@
   PdfStampPicker.prototype._resolveCssScale = function () {
     var z = this._options.zoom;
     if (typeof z === 'number' && isFinite(z) && z > 0) return z;
-    var pad = 48;
-    var cw = Math.max(50, this._container.clientWidth - pad);
-    var ch = Math.max(50, this._container.clientHeight - pad);
+    // 以滚动区可视尺寸为基准（container 含右侧列表面板，不能用）
+    var view = this._scrollEl;
+    // 预留 CSS stage padding + 滚动条宽度，确保 fit 模式不出现横向滚动条
+    var PAD_X = 76;  // 28*2(CSS) + 15(scrollbar) + 余量
+    var PAD_Y = 88;  // 32*2(CSS) + 15(scrollbar) + 余量
+    var cw = Math.max(50, view.clientWidth - PAD_X);
+    var ch = Math.max(50, view.clientHeight - PAD_Y);
     var spanW = this._spanW(), spanH = this._spanH();
     if (!spanW || !spanH) return 1;
     if (z === 'fit-page') return Math.min(cw / spanW, ch / spanH);
@@ -798,6 +802,15 @@
     this._cssScale = this._resolveCssScale();
     this._displayW = this._spanW() * this._cssScale;
     this._displayH = this._spanH() * this._cssScale;
+    // 保险：fit 模式页面宽不超过可视区（防滚动条/舍入导致横向溢出）
+    if (this._options.zoom === 'fit-width' || this._options.zoom === 'fit-page') {
+      var maxW = Math.max(50, this._scrollEl.clientWidth - 12);
+      if (this._displayW > maxW) {
+        this._displayW = maxW;
+        this._cssScale = this._spanW() ? this._displayW / this._spanW() : 1;
+        this._displayH = this._spanH() * this._cssScale;
+      }
+    }
     var p = this._pageEl;
     p.style.width = this._displayW + 'px';
     p.style.height = this._displayH + 'px';
