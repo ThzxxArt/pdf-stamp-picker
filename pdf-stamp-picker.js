@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.6.2';
+  var VERSION = '4.7.0';
 
   /* ====================== 常量 ====================== */
 
@@ -286,8 +286,8 @@
       allowMulti: true,
       stampImage: null,
       stampSize: 120,
-      minStampSize: 24,
-      maxStampSize: 480,
+      minStampSize: 24,   // 废弃（v4.4.3 起章固定大小，保留字段兼容）
+      maxStampSize: 480,  // 废弃
       pdfjsUrl: CDN_PDFJS,
       cMapUrl: undefined   // 中文 PDF 的 CMap 目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
     }, options || {});
@@ -452,7 +452,7 @@
 
     this._btnPoint = btn('point', '定位', '点选模式', function () { self.setMode('point'); });
     this._btnRect = btn('rect', '框选', '框选模式', function () { self.setMode('rect'); });
-    this._btnStamp = btn('stamp', '签章', '拖动签章图片放置（滚轮缩放）', function () { self.setMode('stamp'); });
+    this._btnStamp = btn('stamp', '签章', '签章模式：点击放置公章（章固定大小）', function () { self.setMode('stamp'); });
     sep();
 
     // 当前签章图缩略图（内置公章按用户名生成，只读展示）
@@ -1872,7 +1872,6 @@
     }
   };
 
-  /** 滚轮：stamp 模式下缩放签章图（中心锚定，clamp 尺寸与位置） */
   /** 滚轮：stamp 模式下不劫持（公章固定大小，不可缩放），页面正常滚动 */
   PdfStampPicker.prototype._onWheel = function (e) {
     return; // 公章固定大小：滚轮（含 Ctrl+滚轮）均不缩放，页面滚动照常
@@ -2429,6 +2428,69 @@
       self._toast('❌ 加载失败：' + (err.message || err));
       self._emit('error', { message: err.message });
       if (typeof console !== 'undefined') console.error(err);
+    });
+  };
+
+  /**
+   * 导出当前页 + 签章点布局图为 PNG（审批留档/预览）。
+   * @param {Object} [opts]
+   * @param {number} [opts.scale=2] 输出倍率（1=页面显示尺寸，2=2倍高清）
+   * @param {boolean} [opts.includePdf=true] 是否包含 PDF 内容（false=仅签章点透明图）
+   * @param {boolean} [opts.includeUi=false] 是否包含选区框/手柄/序号等 UI 标记
+   * @returns {Promise<string>} dataURL（PNG）
+   */
+  PdfStampPicker.prototype.exportImage = function (opts) {
+    opts = opts || {};
+    var self = this;
+    if (!this._displayW || !this._displayH) {
+      return Promise.reject(new Error('[PdfStampPicker] 无页面可导出'));
+    }
+    var scale = opts.scale || 2;
+    var canvas = document.createElement('canvas');
+    canvas.width = Math.round(this._displayW * scale);
+    canvas.height = Math.round(this._displayH * scale);
+    var ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
+
+    var draw = function () {
+      // 1) PDF 内容（底层 canvas）
+      if (opts.includePdf !== false && this._canvas.width) {
+        ctx.drawImage(this._canvas, 0, 0, this._displayW, this._displayH);
+      }
+      // 2) 签章点（画到导出 canvas 上）
+      if (opts.includeUi) {
+        // 复用 overlay 全部（含选区框/手柄/序号/网格）
+        ctx.drawImage(this._overlay, 0, 0, this._displayW, this._displayH);
+      } else {
+        // 仅签章图/占位，不带 UI 标记：临时清空选区避免 UI 混入
+        var savedSel = this._sel, savedActive = this._activeId, savedDrag = this._drag;
+        this._sel = null; this._activeId = null; this._drag = null;
+        this._drawStamps(ctx);   // 直接画章图（无 UI 标记）
+        this._sel = savedSel; this._activeId = savedActive; this._drag = savedDrag;
+      }
+    }.bind(this);
+
+    // 章图异步加载完成后再导出（否则图缺失）
+    var imgs = [];
+    this._stamps.forEach(function (st) {
+      if (st.image && st.image.src) {
+        var im = self._imgFor(st.image.src);
+        if (im && !(im.complete && im.naturalWidth)) imgs.push(im);
+      }
+    });
+    if (!imgs.length) {
+      draw();
+      return Promise.resolve(canvas.toDataURL('image/png'));
+    }
+    return Promise.all(imgs.map(function (im) {
+      return new Promise(function (res) {
+        if (im.complete && im.naturalWidth) return res();
+        im.onload = res;
+        im.onerror = res;
+      });
+    })).then(function () {
+      draw();
+      return canvas.toDataURL('image/png');
     });
   };
 

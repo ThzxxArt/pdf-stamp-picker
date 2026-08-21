@@ -183,6 +183,8 @@ export default class PdfStampPicker {
   redo(): this;
   /** 折叠/展开签章列表面板 */
   toggleList(): this;
+  /** 导出当前页+签章点布局图为 PNG（dataURL） */
+  exportImage(opts?: { scale?: number; includePdf?: boolean; includeUi?: boolean }): Promise<string>;
   addStamp(sel: { x: number; y: number; width?: number; height?: number; page?: number; userId?: string; note?: string }): StampJSON;
   removeStamp(id: string): StampJSON | null;
   selectStamp(id: string): this;

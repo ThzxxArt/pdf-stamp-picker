@@ -326,7 +326,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | `cMapUrl` | 自动探测 | 中文 PDF 字体映射目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN） |
 | `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载，优先级最高） |
 
-### 方法（实例 39 个，全部）
+### 方法（实例 40 个，全部）
 
 | 类别 | 方法 | 说明 |
 |---|---|---|
@@ -361,6 +361,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | | `copyJSON()` | 复制 JSON 到剪贴板（内置 toast 反馈） |
 | **撤销** | `undo()` / `redo()` | 撤销/重做签章操作（工具栏按钮 + Ctrl+Z / Ctrl+Shift+Z，上限 50 步） |
 | **面板** | `toggleList()` | 折叠/展开签章列表面板 |
+| **导出** | `exportImage(opts)` | 导出当前页+签章布局图为 PNG：`{scale=2, includePdf=true, includeUi=false}`；`includePdf:false` 得透明底章图 |
 | **坐标** | `screenToPdf(x,y)` | 屏幕px → PDF pt（含旋转补偿） |
 | | `pdfToScreen(x,y)` | PDF pt → 屏幕px |
 | **事件** | `on(type, fn)` / `off(type, fn)` | 事件订阅/退订（链式） |
@@ -406,6 +407,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 - **微调**：方向键移动（`Shift` 加速 10px），`Delete` 删除，`Esc` 取消拖动
 - **列表面板**：按签署方分组显示（色点+数量），点击跳转选中、删除（悬停显现）；工具栏可折叠；跨页保留各页签章
 - **加载反馈**：加载/翻页时页面中央 spinner + 文案
+- **导出布局图**：`exportImage()` 把当前页+签章点导出 PNG（审批留档/预览），可只导出透明底章图
 - **工具栏**：模式切换 / 当前公章缩略图（名字=当前用户）/ 打开本地文件 / URL 加载 / 签署方下拉 / 复制 JSON / 撤销 / 重做 / 面板折叠 / 缩放 / 翻页 / 网格 / 清空
 
 ## 坐标约定
