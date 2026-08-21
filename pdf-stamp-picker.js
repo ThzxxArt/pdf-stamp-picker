@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.0';
+  var VERSION = '4.7.1';
 
   /* ====================== 常量 ====================== */
 
@@ -1656,10 +1656,16 @@
       var snap = JSON.parse(this._history[this._historyIdx]);
       this._stamps = snap || [];
     } catch (e) { return; }
-    // 恢复后：活动签章若不存在则清空
+    // 恢复后：活动签章若不存在则清空；存在则同步屏幕选区（防止活动章绘制位置错乱）
     if (this._activeId && !this._stamps.some(function (st) { return st.id === this._activeId; }, this)) {
       this._activeId = null;
       this._sel = null;
+    } else if (this._activeId) {
+      var active = null;
+      for (var i = 0; i < this._stamps.length; i++) {
+        if (this._stamps[i].id === this._activeId) { active = this._stamps[i]; break; }
+      }
+      if (active) this._syncSelFromStamp(active);
     }
     this._renderList();
     this._paint();
@@ -1817,6 +1823,8 @@
     input.focus();
     input.select();
     var done = function (save) {
+      if (input._closed) return;   // 防 Esc 取消后 blur 再保存
+      input._closed = true;
       if (save) {
         st.note = input.value.trim();
         self._renderList();
@@ -1849,7 +1857,7 @@
     this._overlay.addEventListener('pointermove', this._handlers.move);
     this._overlay.addEventListener('pointerup', this._handlers.up);
     this._overlay.addEventListener('pointercancel', this._handlers.up);
-    this._overlay.addEventListener('wheel', this._handlers.wheel, { passive: false });
+    this._overlay.addEventListener('wheel', this._handlers.wheel, { passive: true });
     this._root.addEventListener('keydown', this._handlers.key);
     this._pinch = null; // 双指缩放状态 {dist, zoom}
     if (typeof ResizeObserver !== 'undefined') {
@@ -1929,6 +1937,8 @@
         dist: dist,
         zoom: this._cssScale
       };
+      // 双指缩放开始：取消单指残留拖拽（避免松手时意外提交/移动）
+      this._drag = null;
       return; // 双指模式不再走单指逻辑
     }
     var rect = this._overlay.getBoundingClientRect();
@@ -2501,6 +2511,15 @@
     if (this._raf) cancelAnimationFrame(this._raf);
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
     if (!this._ro) window.removeEventListener('resize', this._handlers.resize);
+    // 显式解绑事件监听（防 destroy 后仍持有实例引用时泄漏）
+    if (this._overlay && this._handlers) {
+      this._overlay.removeEventListener('pointerdown', this._handlers.down);
+      this._overlay.removeEventListener('pointermove', this._handlers.move);
+      this._overlay.removeEventListener('pointerup', this._handlers.up);
+      this._overlay.removeEventListener('pointercancel', this._handlers.up);
+      this._overlay.removeEventListener('wheel', this._handlers.wheel);
+    }
+    if (this._root && this._handlers) this._root.removeEventListener('keydown', this._handlers.key);
     // 取消未完成的渲染任务
     if (this._renderTask) { try { this._renderTask.cancel(); } catch (e) { /* ignore */ } this._renderTask = null; }
     // 中止未完成的加载
