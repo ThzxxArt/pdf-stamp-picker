@@ -192,6 +192,8 @@ export default class PdfStampPicker {
   /** JSON 导出：toJSON() 按用户分组 / toFlatJSON() 扁平 / copyJSON() 复制 */
   toJSON(): PickerJSON;
   toFlatJSON(): FlatPickerJSON;
+  /** 从 JSON 反显签章点与公章图（users[] 或 stamps[] 结构均可） */
+  importJSON(json: PickerJSON | FlatPickerJSON, opts?: { replace?: boolean }): Promise<void>;
   copyJSON(): Promise<PickerJSON>;
 
   screenToPdf(x: number, y: number): { x: number; y: number };

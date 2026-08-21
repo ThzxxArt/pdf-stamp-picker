@@ -156,6 +156,30 @@ picker.setMode('stamp');
 - 扁平版 `toFlatJSON()`：`stamps[]` 每项内嵌 `user`，需要按签章点遍历时用
 - 单用户查询：`getStampsByUser(userId)`
 
+## JSON 导入反显（回显签章点与公章图）
+
+`toJSON()` 导出的数据可**再导入回显**（换设备继续编辑 / 后端回传盖章结果）：
+
+```js
+// 导出 → 存储/传输 → 再导入
+const json = picker.toJSON();
+await saveToServer(json);
+
+// 另一处/之后回显
+await picker.load('contract.pdf');
+await picker.importJSON(json);
+```
+
+- **恢复签署方列表**（id/name/color 自动同步，缺失的自动添加）
+- **恢复签章点**：坐标/尺寸/页码/备注全部回显，可继续拖动/编辑/删除
+- **公章图片反显**：签章点带 `image`（`{src,name,width,height}`，如后端回传的盖章图）→ 显示该章图；无 image → 自动用内置公章按用户生成
+- **两种结构都支持**：`toJSON()` 的 `users[]` 分组 / `toFlatJSON()` 的扁平 `stamps[]`
+- 导入整体作为**一步撤销**（undo 可整体撤销导入）；自动跳转到第一个有签章点的页面
+
+```js
+picker.importJSON(json, { replace: true });  // replace=false 时不清空现有签章
+```
+
 ## 对接第三方签章接口
 
 `toJSON()` 的结构天然对应主流电子签 API 的 `signers[].signAreas[]` 模型，例如：
@@ -309,6 +333,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | | `clear()` / `clearAll()` | 清空全部签章点 |
 | **JSON** | `toJSON()` | **按用户分组**完整 JSON（对接第三方接口） |
 | | `toFlatJSON()` | 扁平版（stamps[] 内嵌 user） |
+| | `importJSON(json, opts)` | 从 JSON 反显签章点/公章图（users[] 或 stamps[] 均可） |
 | | `copyJSON()` | 复制 JSON 到剪贴板（内置 toast 反馈） |
 | **撤销** | `undo()` / `redo()` | 撤销/重做签章操作（工具栏按钮 + Ctrl+Z / Ctrl+Shift+Z，上限 50 步） |
 | **面板** | `toggleList()` | 折叠/展开签章列表面板 |
@@ -341,6 +366,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | `stampchange` | 签章点被移动/缩放 | 更新后对象 |
 | `stampselect` | 选中签章点 | 签章点对象 |
 | `stampimage` | 签章图更换 | `{src, name, width, height}` |
+| `import` | JSON 导入完成 | `{count, users}` |
 | `overlap` | 签章点重叠检测 | `{stamp, overlaps:[{id,userId,name}]}` |
 | `error` | 加载/运行错误 | `{message}` |
 

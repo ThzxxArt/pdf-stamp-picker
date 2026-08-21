@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.5.1';
+  var VERSION = '4.6.0';
 
   /* ====================== 常量 ====================== */
 
@@ -1415,6 +1415,99 @@
     return this.getStamps().filter(function (s) { return s.user && s.user.id === userId; });
   };
 
+  /**
+   * 从 JSON 恢复签章点（反显）：toJSON() / toFlatJSON() 输出均可导入。
+   * - 恢复签署方列表（id/name/color）
+   * - 恢复每个签章点坐标/尺寸/页码/备注
+   * - 签章点带 image（{src,name,width,height}）→ 反显该章图；无 image → 内置公章按用户生成
+   * - 恢复后自动跳转到第一个有签章点的页面
+   * @param {Object} json toJSON()/toFlatJSON() 输出
+   * @param {Object} [opts] { replace=true 替换现有签章 }
+   */
+  PdfStampPicker.prototype.importJSON = function (json, opts) {
+    opts = opts || {};
+    if (!json || typeof json !== 'object') {
+      throw new Error('[PdfStampPicker] importJSON 需要 JSON 对象');
+    }
+    var self = this;
+    var stamps = [];
+    var users = [];
+
+    // 结构检测：v4 用户分组 users[] | 扁平 stamps[]（内嵌 user）
+    if (Array.isArray(json.users)) {
+      json.users.forEach(function (g) {
+        if (!g || !g.user) return;
+        users.push(g.user);
+        (g.stamps || []).forEach(function (st) {
+          stamps.push(Object.assign({ userId: g.user.id }, st));
+        });
+      });
+    } else if (Array.isArray(json.stamps)) {
+      json.stamps.forEach(function (st) {
+        if (!st) return;
+        users.push(st.user || null);
+        stamps.push(Object.assign({}, st));
+      });
+    } else {
+      throw new Error('[PdfStampPicker] importJSON 结构无法识别（需 users[] 或 stamps[]）');
+    }
+
+    // 1) 同步签署方（更新已有 / 添加缺失）
+    users.forEach(function (u) {
+      if (!u || !u.id) return;
+      var ex = self._userById(u.id);
+      if (ex) {
+        if (u.name) ex.name = u.name;
+        if (u.color) ex.color = u.color;
+      } else {
+        self.addUser({ id: u.id, name: u.name, color: u.color });
+      }
+    });
+
+    // 2) 记录历史起点，恢复后合并为一步撤销
+    var baseIdx = this._historyIdx;
+    if (opts.replace !== false) this._stamps = [];
+
+    var firstPage = 0;
+    stamps.forEach(function (st) {
+      if (!st || typeof st.x !== 'number' || typeof st.y !== 'number') return;
+      self.addStamp({
+        x: st.x, y: st.y,
+        width: st.width, height: st.height,
+        page: st.page || self._pageNumber,
+        userId: st.userId || self._currentUserId,
+        note: st.note || '',
+        image: st.image || null
+      });
+      if (st.page && (!firstPage || st.page < firstPage)) firstPage = st.page;
+    });
+
+    // 合并历史：整体导入作为一步撤销
+    if (this._historyIdx > baseIdx) {
+      this._history = this._history.slice(0, baseIdx + 1);
+      this._history.push(JSON.stringify(this._stamps));
+      this._historyIdx = this._history.length - 1;
+    }
+
+    // 3) 跳转到第一个有签章点的页面；恢复最后一个签章点为选中（否则活动章无选区不绘制）
+    this._renderList();
+    var lastStamp = this._stamps.length ? this._stamps[this._stamps.length - 1] : null;
+    if (lastStamp) {
+      this._activeId = lastStamp.id;
+      this._syncSelFromStamp(lastStamp);
+    }
+    var go = function () {
+      self._paint();
+      self._emit('import', { count: self._stamps.length, users: self._users.length });
+      self._emit('change', self.getSelection());
+    };
+    if (firstPage && firstPage !== this._pageNumber && this._pdfMode === 'pdfjs' && this._pdf) {
+      return this.gotoPage(firstPage).then(go);
+    }
+    go();
+    return Promise.resolve();
+  };
+
   PdfStampPicker.prototype.copyJSON = function () {
     var self = this;
     var json = this.toJSON();
@@ -1462,9 +1555,10 @@
       throw new Error('[PdfStampPicker] addStamp 需要 {x, y[, width, height]}');
     }
     var page = sel.page || this._pageNumber;
-    // 快照当前用户的公章图（内部绘制用；JSON 输出不含 image）
-    var img = null;
-    if (this._stampImg && this._stampImg.el) {
+    // 快照公章图（内部绘制用；JSON 输出不含 image）：
+    // 优先外部传入（importJSON 反显），否则快照当前用户章
+    var img = sel.image || null;
+    if (!img && this._stampImg && this._stampImg.el) {
       img = { src: this._stampImg.src, name: this._stampImg.name, width: this._stampImg.w, height: this._stampImg.h };
     }
     var stamp = {
@@ -2173,7 +2267,9 @@
     for (var i = 0; i < this._stamps.length; i++) {
       var st = this._stamps[i];
       if (st.page !== this._pageNumber) continue;
-      if (st.id === this._activeId) continue; // 活动由 _paint 详细绘制
+      // stamp 模式的活动签章由 _drawRectSel 绘制（带选中框/手柄）
+      if (st.id === this._activeId && this._options.mode === 'stamp') continue;
+      var isActive = st.id === this._activeId;
       var u = this._userById(st.userId) || this._users[0];
       var color = u.color;
       var p = this.pdfToScreen(st.x, st.y);
@@ -2193,6 +2289,15 @@
           ctx.strokeStyle = hexToRgba(color, 0.55);
           ctx.lineWidth = 1;
           ctx.strokeRect(l, t, w, h);
+          if (isActive) {
+            // 活动态（非 stamp 模式）：外发光选中框
+            ctx.strokeStyle = hexToRgba(color, 0.35);
+            ctx.lineWidth = 5;
+            ctx.strokeRect(l - 1, t - 1, w + 2, h + 2);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = color;
+            ctx.strokeRect(l, t, w, h);
+          }
           drawSeqBadge(ctx, i + 1, l, t, color);
           ctx.setLineDash([]);
           continue;
@@ -2255,7 +2360,7 @@
       return;
     }
 
-    // stamp 模式活动签章：用签章点自己的公章图（半透明+手柄），不随当前用户变化
+    // stamp 模式/有章图的签章点：画签章点自己的公章图（不随当前用户变化）
     var activeSt = isActive ? this.getActiveStamp() : null;
     var activeImg = null;
     if (isActive && activeSt && activeSt.image) {
