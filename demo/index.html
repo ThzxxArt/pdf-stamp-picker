@@ -217,11 +217,12 @@ function initContainerMode() {
     zoom: 'fit-width'
   });
   bindPicker(picker);
-  picker.load('test.pdf').then(() => {
+  // 用流接口方式加载（fetch 拿字节 → document.hash 可计算显示；静态 URL 原生流式无字节缓存）
+  picker.load({ url: 'test.pdf', headers: { 'X-Demo': 'local' } }).then(() => {
     renderJSON(); renderUsers();
     return picker._ensureStampImage();
   }).then(() => {
-    info.textContent = '已加载 test.pdf（3页）· 顶部工具栏可切换模式';
+    info.textContent = '已加载 test.pdf（3页）· document.hash = SHA-256 文件指纹';
   }).catch(e => { info.textContent = '加载失败: ' + e.message; });
 }
 
@@ -277,7 +278,7 @@ document.getElementById('tab-modal').addEventListener('click', () => {
   if (document.getElementById('tab-modal').classList.contains('active')) return;
   switchTab('tab-modal');
   PdfStampPicker.openModal({
-    source: 'test.pdf',
+    source: { url: 'test.pdf', headers: { 'X-Demo': 'modal' } },
     title: '选择签章位置（弹窗）',
     users: USERS,
     currentUser: 'u2',
