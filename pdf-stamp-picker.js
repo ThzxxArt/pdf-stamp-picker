@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.5';
+  var VERSION = '4.7.6';
 
   /* ====================== 常量 ====================== */
 
@@ -1711,8 +1711,17 @@
     this._emit('stampchange', null);
   };
 
+  /** 轻量同步列表选中态（不重建 DOM，避免破坏双击编辑备注） */
+  PdfStampPicker.prototype._syncListActive = function () {
+    if (!this._listBody) return;
+    var items = this._listBody.querySelectorAll('.psp-item');
+    for (var i = 0; i < items.length; i++) {
+      items[i].classList.toggle('active', items[i].dataset.id === this._activeId);
+    }
+  };
+
   /** 选中列表中的签章点并跳转页面 */
-  PdfStampPicker.prototype.selectStamp = function (id) {
+  PdfStampPicker.prototype.selectStamp = function (id, light) {
     var stamp = null;
     for (var i = 0; i < this._stamps.length; i++) {
       if (this._stamps[i].id === id) { stamp = this._stamps[i]; break; }
@@ -1723,7 +1732,11 @@
       self._activeId = stamp.id;
       self._syncSelFromStamp(stamp);
       self._paint();
-      self._renderList();
+      if (light) {
+        self._syncListActive();   // 轻量：不重建列表 DOM
+      } else {
+        self._renderList();
+      }
       self._emit('stampselect', self.getStamps().filter(function (s) { return s.id === id; })[0] || null);
     };
     if (stamp.page !== this._pageNumber) {
@@ -1835,7 +1848,7 @@
           e.stopPropagation();
           self.removeStamp(st.id);
         });
-        item.addEventListener('click', function () { self.selectStamp(st.id); });
+        item.addEventListener('click', function () { self.selectStamp(st.id, true); });
         // 双击：内联编辑备注
         item.addEventListener('dblclick', function () {
           self._editStampNote(st, main);
@@ -1996,7 +2009,7 @@
         this._syncSelFromStamp(hitSt);
         this._drag = { type: 'move', startX: x, startY: y, sel: cloneSel(this._sel) };
         this._paint();
-        this._renderList();
+        this._syncListActive();   // 轻量：不重建列表 DOM
         this._emit('stampselect', hitSt);
         return;
       }
@@ -2035,7 +2048,7 @@
         this._activeId = hit.id;
         this._syncSelFromStamp(hit);
         this._paint();
-        this._renderList();
+        this._syncListActive();   // 轻量：不重建列表 DOM
         this._emit('stampselect', hit);
       }
     }
@@ -2058,7 +2071,7 @@
         this._syncSelFromStamp(hitStamp);
         this._drag = { type: 'move', startX: x, startY: y, sel: cloneSel(this._sel) };
         this._paint();
-        this._renderList();
+        this._syncListActive();   // 轻量：不重建列表 DOM
         this._emit('stampselect', hitStamp);
       } else {
         this._drag = {
