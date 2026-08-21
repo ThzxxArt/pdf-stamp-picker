@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PdfStampPicker v2 — 多用户多签章坐标选择器 Demo</title>
+<title>PdfStampPicker v4.1 — 多用户多签章坐标选择器 Demo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #202124; color: #e8eaed; height: 100vh; display: flex; flex-direction: column; }
@@ -36,9 +36,10 @@
 </head>
 <body>
 <header>
-  <h1>PdfStampPicker <span class="tag">v2.0.0 · 单文件零依赖</span></h1>
+  <h1>PdfStampPicker <span class="tag">v4.1.0 · 单文件零依赖</span></h1>
   <nav class="tabs">
     <button id="tab-container" class="active">容器模式（多用户/多签章）</button>
+    <button id="tab-canvas">纯画布模式</button>
     <button id="tab-modal">弹窗模式</button>
   </nav>
 </header>
@@ -54,11 +55,22 @@
     <h2>实时 JSON 输出</h2>
     <div id="info"></div>
     <div id="output">等待操作…</div>
+    <h2 style="padding-bottom:4px">选择模式</h2>
     <div class="actions">
-      <button id="btn-stamp">签章模式（拖公章）</button>
+      <button id="mode-rect" class="active">框选</button>
+      <button id="mode-point">点选</button>
+      <button id="mode-stamp">签章（拖公章）</button>
+    </div>
+    <h2 style="padding-bottom:4px">操作</h2>
+    <div class="actions">
       <button id="btn-add">程序化加签章</button>
       <button id="btn-json">复制 JSON</button>
       <button id="btn-clear">清空</button>
+    </div>
+    <h2 style="padding-bottom:4px">加载方式</h2>
+    <div class="actions">
+      <button id="btn-local">📁 本地上传</button>
+      <button id="btn-stream">🔗 文件流接口模拟</button>
     </div>
     <div style="padding:0 12px 10px;font-size:10.5px;color:#9aa0a6;line-height:1.6">
       💡 签章模式：点击页面即放置签章点（按住可拖动位置），滚轮缩放，图片不能拖出页面边界。内置公章上的名字 = 当前用户（切换用户自动更新）。
@@ -87,7 +99,9 @@ function renderJSON() {
   if (!picker) return;
   const json = picker.toJSON();
   output.textContent = JSON.stringify(json, null, 2);
-  info.textContent = `文档: ${json.document.name || '(未命名)'} · ${json.document.pages}页 · 签章点 ${json.stamps.length} 个`;
+  const total = json.users.reduce((n, g) => n + g.stamps.length, 0);
+  const signed = json.users.filter(g => g.stamps.length > 0).map(g => g.user.name).join('、') || '无';
+  info.textContent = `文档: ${json.document.name || '(未命名)'} · ${json.document.pages}页 · 签章点 ${total} 个（${signed}）`;
   // 高亮当前用户
   const cu = picker.getCurrentUser();
   document.querySelectorAll('#users button').forEach(b => b.classList.toggle('active', b.dataset.id === cu.id));
@@ -133,13 +147,47 @@ document.getElementById('users').addEventListener('click', e => {
   info.textContent = `当前签章用户: ${picker.getCurrentUser().name}`;
 });
 
-// 签章模式（拖动公章放置）
-document.getElementById('btn-stamp').addEventListener('click', e => {
+// 模式切换：框选 / 点选 / 签章
+document.getElementById('mode-rect').addEventListener('click', e => {
+  if (!picker) return;
+  picker.setMode('rect');
+  setModeBtn('mode-rect');
+  info.textContent = '框选模式：按住拖动绘制签章区域';
+});
+document.getElementById('mode-point').addEventListener('click', e => {
+  if (!picker) return;
+  picker.setMode('point');
+  setModeBtn('mode-point');
+  info.textContent = '点选模式：单击放置签章锚点';
+});
+document.getElementById('mode-stamp').addEventListener('click', e => {
   if (!picker) return;
   picker.setMode('stamp');
-  document.querySelectorAll('.actions button').forEach(b => b.classList.remove('active'));
-  e.target.classList.add('active');
+  setModeBtn('mode-stamp');
   info.textContent = '签章模式：点击放置签章点，按住拖动，滚轮缩放，公章名字=当前用户';
+});
+function setModeBtn(id) {
+  document.querySelectorAll('#mode-rect,#mode-point,#mode-stamp').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// 本地上传
+document.getElementById('btn-local').addEventListener('click', () => {
+  if (!picker) return;
+  picker._fileInput.click();
+});
+
+// 文件流接口模拟（带自定义请求头走 fetch 分支）
+document.getElementById('btn-stream').addEventListener('click', async () => {
+  if (!picker) return;
+  info.textContent = '正在通过文件流接口加载（fetch + 自定义头）…';
+  try {
+    await picker.load({ url: 'test.pdf', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Authorization': 'Bearer demo-token' } });
+    info.textContent = '文件流接口加载成功 ✓（模拟 {url, headers} 方式，适合带鉴权的真实接口）';
+    renderJSON();
+  } catch (err) {
+    info.textContent = '文件流接口加载失败: ' + err.message;
+  }
 });
 
 // 程序化添加
@@ -165,11 +213,60 @@ document.getElementById('btn-clear').addEventListener('click', () => {
   renderJSON();
 });
 
-// ============ 弹窗模式 ============
+// ============ 纯画布模式 ============
+function initCanvasMode() {
+  stage.innerHTML = '';
+  // 宿主自行渲染"合同页"canvas（模拟：库不参与渲染，只做坐标选择）
+  const W = 595.28, H = 841.89;
+  const cv = document.createElement('canvas');
+  const scale = 2;
+  cv.width = W * scale; cv.height = H * scale;
+  const ctx = cv.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.fillStyle = '#fafafa'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1; ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+  ctx.fillStyle = '#333'; ctx.font = 'bold 22px serif'; ctx.fillText('购销合同', 40, 100);
+  ctx.font = '13px sans-serif'; ctx.fillStyle = '#666';
+  ctx.fillText('甲方：示例科技有限公司', 40, 150);
+  ctx.fillText('乙方：示例贸易有限公司', 40, 180);
+  ctx.font = '12px sans-serif'; ctx.fillStyle = '#999';
+  for (let i = 0; i < 14; i++) ctx.fillText('……（合同条款正文占位）……', 40, 230 + i * 32);
+  ctx.strokeStyle = '#c33'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
+  ctx.strokeRect(400, 600, 150, 90); ctx.fillStyle = '#c33'; ctx.font = '11px sans-serif'; ctx.fillText('盖章区', 455, 645);
+  ctx.setLineDash([]);
+  ctx.strokeStyle = '#36c'; ctx.strokeRect(80, 680, 180, 50); ctx.fillStyle = '#36c'; ctx.fillText('签字处', 150, 710);
+
+  picker = new PdfStampPicker(stage, { mode: 'stamp', controls: true, users: USERS, currentUser: 'u2' });
+  ['stampadd','stampremove','stampchange','stampselect','clear','pagechange'].forEach(t => picker.on(t, renderJSON));
+  picker.on('error', e => { info.textContent = '错误: ' + e.message; console.error(e); });
+  picker.setPage({ canvas: cv, width: W, height: H, rotation: 0, pageNumber: 1, totalPages: 1, name: 'canvas合同.pdf' });
+  picker._ensureStampImage().then(() => {
+    info.textContent = '纯画布模式：宿主渲染 canvas，库只做坐标选择（setPage）';
+    renderJSON();
+  });
+}
+
+// ============ Tab 切换 ============
+function switchTab(activeId) {
+  ['tab-container','tab-canvas','tab-modal'].forEach(id => {
+    document.getElementById(id).classList.toggle('active', id === activeId);
+  });
+}
+document.getElementById('tab-container').addEventListener('click', () => {
+  if (document.getElementById('tab-container').classList.contains('active')) return;
+  switchTab('tab-container');
+  if (picker) { try { picker.destroy(); } catch (e) {} }
+  initContainerMode();
+});
+document.getElementById('tab-canvas').addEventListener('click', () => {
+  if (document.getElementById('tab-canvas').classList.contains('active')) return;
+  switchTab('tab-canvas');
+  if (picker) { try { picker.destroy(); } catch (e) {} }
+  initCanvasMode();
+});
 document.getElementById('tab-modal').addEventListener('click', () => {
   if (document.getElementById('tab-modal').classList.contains('active')) return;
-  document.getElementById('tab-container').classList.remove('active');
-  document.getElementById('tab-modal').classList.add('active');
+  switchTab('tab-modal');
 
   // 一键弹窗：确认后返回 JSON
   PdfStampPicker.openModal({
@@ -180,17 +277,17 @@ document.getElementById('tab-modal').addEventListener('click', () => {
     confirmText: '确认签章',
     cancelText: '取消',
     requireStamp: true,   // 必须有签章点才能确认
-    pickerOptions: { controls: true, zoom: 'fit-width' },
-    onConfirm: json => { console.log('用户确认，签章点数量:', json.stamps.length); }
+    pickerOptions: { controls: true, zoom: 'fit-width', mode: 'stamp' },
+    onConfirm: json => { const n = json.users.reduce((a, g) => a + g.stamps.length, 0); console.log('用户确认，签章点数量:', n); }
   }).then(json => {
     if (json) {
-      info.textContent = `弹窗确认：返回 ${json.stamps.length} 个签章点 JSON`;
+      const n = json.users.reduce((a, g) => a + g.stamps.length, 0);
+      info.textContent = `弹窗确认：返回 ${n} 个签章点（按用户分组）JSON`;
       output.textContent = JSON.stringify(json, null, 2);
     } else {
       info.textContent = '弹窗已取消';
     }
-    document.getElementById('tab-container').classList.add('active');
-    document.getElementById('tab-modal').classList.remove('active');
+    switchTab('tab-container');
   });
 });
 

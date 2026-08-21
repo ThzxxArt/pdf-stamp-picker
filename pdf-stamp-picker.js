@@ -1940,7 +1940,10 @@
       }
       function doConfirm() {
         var json = picker.toJSON();
-        if (config.requireStamp && (!json.stamps || !json.stamps.length)) return;
+        var stampTotal = (json.users || []).reduce(function (n, g) {
+          return n + (g.stamps ? g.stamps.length : 0);
+        }, 0);
+        if (config.requireStamp && stampTotal === 0) return;
         if (config.onConfirm) {
           try {
             var r = config.onConfirm(json);
