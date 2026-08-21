@@ -6,7 +6,7 @@
 
 > ⚠️ 定位说明：这是**签章点坐标选择器**，不是真实盖章渲染器。输出的是签章位置坐标 + 归属用户，**不输出图片**。页面上的公章图只是拖放定位的视觉载体，放置后显示为带用户颜色的占位框。
 
-v4.1 特性：**精致 UI（图标工具栏/玻璃拟态/卡片列表/动效）** · **JSON 按用户分组（users[].stamps[]，直接对接第三方签章接口）** · 拖动内置公章放置签章点（不越界）· 多签章点 · 多用户归属 · 一键弹窗 · 统一加载 · **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
+v4.3 特性：**精致 UI（图标工具栏/卡片列表/序号角标/toast）** · **JSON 按用户分组（users[].stamps[]，直接对接第三方签章接口）** · 点击即放签章（不越界）· 多签章点 · 多用户归属 · 一键弹窗 · 统一加载 · **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
 
 ## 快速开始（真实项目只需一个容器）
 
@@ -42,17 +42,18 @@ v4.1 特性：**精致 UI（图标工具栏/玻璃拟态/卡片列表/动效）*
 
 全部找不到才回退 CDN（cdnjs）。所以项目里只要把 `pdf-stamp-picker.js` 和 `vendor/` 放一起，**离线/内网环境零配置可用**。worker 自动按 `pdf.min.js → pdf.worker.min.js` 规则推断。
 
-## ✨ 拖动公章放置（签章模式）
+## ✨ 签章模式（拖动公章放置）
 
 **签章模式**（`picker.setMode('stamp')` 或工具栏「签章」按钮）：
 
-1. 鼠标移入页面 → 显示半透明**公章跟随预览**（名字 = 当前用户，自动避让边界）
-2. **按下拖动 → 松手放置**：公章从按下点跟手移动，松手落定
-3. 放置后显示**用户色占位框 + 用户名标签**（坐标占位，非真实盖章效果）
-4. 点击空白处可**连续放置**多个；点击已有签章点选中（8 向手柄拖动/缩放）
-5. 🛡️ **全程不能拖出页面边界**（拖拽/预览/缩放均 clamp 在页面矩形内）
+1. **点击 PDF 任意位置 → 章立即放置**（完整不透明落定，数据即时提交）
+2. 按住已放置的章可**拖动调整位置**（拖动中半透明跟手，松手落定）
+3. 点击章选中 → 8 向手柄缩放；**Ctrl+滚轮**调整大小（24~480px）
+4. 点击空白处可**连续放置**多个；页面上所有签章点显示**序号角标**（①②③）
+5. 🛡️ **全程不能拖出页面边界**（拖拽/缩放均 clamp 在页面矩形内）
+6. **滚轮 = 页面滚动**（不劫持），与浏览器习惯一致
 
-**公章名字跟随用户**：切到"乙方"再放置，公章预览图自动变成"乙方"的名字（内置 canvas 动态生成，零外部资源）。
+**公章名字跟随用户**：切到"乙方"再放置，公章自动变成"乙方"的名字（内置 canvas 动态生成，零外部资源）。放置后每个签章点快照自己的章图，切换用户不影响已放置的章。
 
 ## 一键弹窗模式
 
@@ -64,8 +65,10 @@ const json = await PdfStampPicker.openModal({
   requireStamp: true,             // 必须有签章点才能确认
   pickerOptions: { mode: 'stamp' } // 直接进签章模式
 });
-// json → { document: {...}, stamps: [...] }，取消 → null
+// json → { document: {...}, users: [{user, stamps}] }，取消 → null
 ```
+
+`openModal` 全部参数：`source` `title` `users` `currentUser` `confirmText` `cancelText` `requireStamp` `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（透传给选择器）。
 
 ## 统一加载（load source 支持 5 种）
 
@@ -160,62 +163,155 @@ picker.removeUser('b');               // 移除乙方及其签章点
 picker.setCurrentUser('c');           // 后续新增的签章归属丙方
 ```
 
-- 每个签章点在页面上以**用户颜色**边框标识，列表按用户着色
+- 每个签章点在页面上以**用户颜色**边框标识，列表按用户分组着色
 - 切换用户后新放置的签章自动归属当前用户
 - JSON 中每项带 `user` 对象，可直接作为后台签名数据
+- `removeUser(id)` 移除签署方及其全部签章点（当前用户不可移除）
+
+## 纯画布模式（宿主渲染，库只做坐标选择）
+
+PDF 由宿主自行渲染（图片转 canvas、服务端渲染图、在线合同模板等），库只负责签章坐标：
+
+```js
+const canvas = await renderMyPage();   // 宿主任意方式渲染
+picker.setPage({
+  canvas,              // 已渲染的 canvas（内部分辨率不限）
+  width: 595.28,       // PDF 页面宽 (pt)
+  height: 841.89,      // PDF 页面高 (pt)
+  rotation: 0,         // 页面旋转（可选，自动补偿）
+  pageNumber: 1,       // 页码（可选）
+  totalPages: 3,       // 总页数（可选）
+  name: '合同.pdf'     // 文档名（可选，进 JSON）
+});
+```
+
+此模式不需要 pdf.js，**连 PDF 解析都不依赖**，纯坐标选择。
 
 ## API 总览
 
-### 构造选项
+### 签章图
+
+```js
+// 默认：内置红色公章（名字=当前用户，切换用户自动重新生成）
+// 自定义：支持 File / URL / dataURL / canvas
+await picker.setStampImage(file);                // 本地图片文件
+await picker.setStampImage('https://x.com/seal.png');
+await picker.setStampImage(canvasElement);       // canvas 生成的章
+picker.getStampImage();  // → {src, name, width, height}
+```
+
+> ⚠️ 放置后每个签章点**快照自己的章图**（内部绘制用），切换用户/新放置不影响已放置的章；JSON 输出始终**不含图片**（坐标选择器定位）。
+
+### 坐标转换
+
+```js
+picker.screenToPdf(300, 400);   // 屏幕px → {x, y} PDF pt（含旋转补偿）
+picker.pdfToScreen(140, 560);   // PDF pt → {x, y} 屏幕px
+```
+
+### 程序化添加签章点
+
+```js
+picker.addStamp({ x: 100, y: 600, width: 150, height: 80, note: '公章' });
+// 指定页/指定签署方
+picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
+```
+
+## 构造选项（全部 19 项）
 
 | option | 默认 | 说明 |
 |---|---|---|
-| `mode` | `'rect'` | `'point'` 点选 / `'rect'` 框选 / `'stamp'` 拖放签章图 |
-| `zoom` | `'fit-width'` | 数字 / `'fit-width'` / `'fit-page'` |
-| `aspectRatio` | `null` | 选区固定宽高比 |
-| `minSize` | `4` | 选区最小尺寸(px) |
+| `mode` | `'rect'` | 初始模式：`'point'` 点选 / `'rect'` 框选 / `'stamp'` 拖放签章图 |
+| `zoom` | `'fit-width'` | 初始缩放：数字(1pt→N px) / `'fit-width'` 适应宽度 / `'fit-page'` 适应整页 |
+| `aspectRatio` | `null` | 框选模式选区固定宽高比（w/h） |
+| `minSize` | `4` | 选区最小尺寸(屏幕px) |
 | `showGrid` | `false` | 网格辅助线 |
-| `controls` | `true` | 内置工具栏 + 列表（全 UI 内置） |
+| `controls` | `true` | 内置工具栏 + 列表面板（全 UI 内置） |
 | `showList` | `true` | 签章列表面板 |
-| `theme` | `'dark'` | `'dark'` / `'light'` |
-| `users` | 默认用户 | `[{id, name, color}]` |
-| `currentUser` | 第一个用户 | 当前签章用户 |
-| `allowMulti` | `true` | 允许多签章 |
-| `stampImage` | 内置公章 | 可选自定义签章图（不配则内置公章按用户名生成） |
+| `theme` | `'dark'` | `'dark'` / `'light'`（当前均为浅色内容区 + 深色工具栏） |
+| `dpi` | `96` | px 单位换算参考（影响输出 px 字段） |
+| `users` | 默认用户 | `[{id, name, color}]` 签署方列表 |
+| `currentUser` | 第一个用户 | 当前签章用户 id |
+| `allowMulti` | `true` | 允许多签章点（false 时新放置清空旧点） |
+| `keepSelectionOnPageChange` | `false` | 翻页时是否保留当前选区/选中态 |
+| `stampImage` | 内置公章 | 可选自定义签章图（URL/dataURL/File/canvas；不配则内置公章按用户名生成） |
 | `stampSize` | `120` | 签章图显示基准宽度 px |
-| `minStampSize` / `maxStampSize` | `24` / `480` | 签章图缩放范围 |
+| `minStampSize` / `maxStampSize` | `24` / `480` | 签章图缩放范围（Ctrl+滚轮） |
 | `pdfjsUrl` | 自动探测 | 显式指定 pdf.js 地址（默认自动探测本地 vendor → CDN 兜底） |
-| `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载） |
+| `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载，优先级最高） |
 
-### 方法
+### 方法（实例 34 个，全部）
 
-| 类别 | 方法 |
+| 类别 | 方法 | 说明 |
+|---|---|---|
+| **加载** | `load(source, {pageNumber})` | 统一入口：File/ArrayBuffer/Uint8Array/静态URL/流接口配置/pdfjs proxy |
+| | `loadPDF(source, opts)` | 兼容旧名（同 load） |
+| | `setPage(meta)` | 纯画布模式：`{canvas, width, height, rotation, pageNumber, totalPages, name}` |
+| | `gotoPage(n)` | 翻页（Promise），自动补偿旋转 |
+| **缩放** | `setZoom(z)` | 数字 / `'fit-width'` / `'fit-page'` |
+| | `getZoom()` | 当前缩放值（px per pt） |
+| | `fitWidth()` / `fitPage()` | 快捷适应 |
+| **模式** | `setMode('point'\|'rect'\|'stamp')` | 切换选择模式 |
+| | `setAspectRatio(ratio)` | 框选宽高比锁定（null 解除） |
+| | `setShowGrid(bool)` | 网格辅助线 |
+| **签章图** | `setStampImage(src)` | 换签章图：File/URL/dataURL/canvas → Promise<{src,name,width,height}> |
+| | `getStampImage()` | 当前签章图信息 |
+| **用户** | `setCurrentUser(id)` | 切换当前签署方（公章名字随之更新） |
+| | `getCurrentUser()` | 当前签署方对象 |
+| | `addUser({id,name,color})` | 添加签署方（工具栏下拉同步） |
+| | `removeUser(id)` | 移除签署方及其签章点（不可移除当前用户） |
+| **签章点** | `addStamp({x,y,width,height,page,userId,note})` | 程序化添加签章点（PDF 坐标）→ 返回 stamp |
+| | `getStamps()` | 全部签章点数组（扁平，带 user） |
+| | `getStampsByUser(userId)` | 某签署方的签章点 |
+| | `getActiveStamp()` | 当前选中签章点 |
+| | `getSelection()` | 当前活动选区（PDF 坐标） |
+| | `selectStamp(id)` | 选中签章点（自动跳转所在页） |
+| | `removeStamp(id)` | 删除指定签章点 |
+| | `removeSelection()` | 删除当前选中（无选中则清空临时选区） |
+| | `clear()` / `clearAll()` | 清空全部签章点 |
+| **JSON** | `toJSON()` | **按用户分组**完整 JSON（对接第三方接口） |
+| | `toFlatJSON()` | 扁平版（stamps[] 内嵌 user） |
+| | `copyJSON()` | 复制 JSON 到剪贴板（内置 toast 反馈） |
+| **坐标** | `screenToPdf(x,y)` | 屏幕px → PDF pt（含旋转补偿） |
+| | `pdfToScreen(x,y)` | PDF pt → 屏幕px |
+| **事件** | `on(type, fn)` / `off(type, fn)` | 事件订阅/退订（链式） |
+| **销毁** | `destroy()` | 移除 DOM、监听、RAF（必调防泄漏） |
+
+### 静态成员
+
+| 成员 | 说明 |
 |---|---|
-| 加载 | `load(source)` `loadPDF()` `setPage(meta)` `gotoPage(n)` |
-| 缩放 | `setZoom(z)` `getZoom()` `fitWidth()` `fitPage()` |
-| 模式 | `setMode('point'\|'rect'\|'stamp')` `setAspectRatio()` `setShowGrid()` |
-| 签章图 | `setStampImage(src)` `getStampImage()` |
-| 用户 | `setCurrentUser()` `getCurrentUser()` `addUser()` |
-| 签章 | `getStamps()` `addStamp()` `removeStamp()` `selectStamp()` `getSelection()` `clear()` `removeSelection()` |
-| JSON | `toJSON()` `copyJSON()` |
-| 坐标 | `screenToPdf()` `pdfToScreen()` |
-| 事件 | `on(type, fn)` `off(type, fn)` |
-| 弹窗 | `PdfStampPicker.openModal(config)`（静态） |
-| 其他 | `PdfStampPicker.loadPdfJs(url)`（静态预加载） `destroy()` |
+| `PdfStampPicker.openModal(config)` | 一键弹窗 → Promise&lt;JSON \| null&gt; |
+| `PdfStampPicker.loadPdfJs(url)` | 预加载 pdf.js（指定地址） |
+| `PdfStampPicker.loadPdfJsAuto()` | 自动探测加载（本地 vendor → CDN 兜底） |
+| `PdfStampPicker.version` | 库版本号字符串 |
 
-### 事件
+### 事件（全部 12 个）
 
-`ready` `load` `change` `select` `clear` `pagechange` `zoomchange` `stampadd` `stampremove` `stampchange` `stampselect` `stampimage` `error`
+| 事件 | 触发时机 | payload |
+|---|---|---|
+| `ready` | 初始化完成 | `{}` |
+| `change` | 选区变化（拖动中/微调） | 当前选区 |
+| `select` | 选择完成（松手放置） | 签章点对象 |
+| `clear` | 全部清空 | `{}` |
+| `pagechange` | 翻页完成 | `{page, totalPages, width, height, rotation}` |
+| `zoomchange` | 缩放变化 | `{zoom}` |
+| `stampadd` | 新增签章点 | 签章点对象 |
+| `stampremove` | 删除签章点 | 被删对象 |
+| `stampchange` | 签章点被移动/缩放 | 更新后对象 |
+| `stampselect` | 选中签章点 | 签章点对象 |
+| `stampimage` | 签章图更换 | `{src, name, width, height}` |
+| `error` | 加载/运行错误 | `{message}` |
 
 ## 交互
 
-- **签章模式**：跟随预览（公章名=当前用户）→ 按下拖动 → 松手放置（用户色占位框）；滚轮缩放；点击已有签章选中；**不越界**
-- **框选**：拖动绘制；`Shift` 锁正方形；完成后自动加入签章列表
-- **点选**：单击放置锚点，可拖动移动
-- **多签章**：点击已有签章点切换选中（带手柄），拖拽移动、8 向手柄缩放
-- **微调**：方向键移动（`Shift` 加速），`Delete` 删除，`Esc` 取消拖动
-- **列表面板**：点击跳转选中、删除；翻页跨页保留各页签章
-- **工具栏**：模式切换 / 当前签章图缩略图（名字=当前用户）/ 打开本地文件 / URL 加载 / 用户切换 / 复制 JSON / 缩放 / 翻页 / 网格
+- **签章模式**：点击即放置（完整落定）；拖动微调（拖动中半透明）；Ctrl+滚轮缩放；点击选中；**不越界**；滚轮=页面滚动
+- **框选**：拖动绘制矩形；`Shift` 锁正方形；完成后自动加入签章列表
+- **点选**：单击放置锚点（双环+准星样式），可拖动移动
+- **多签章**：点击已有签章点切换选中（带手柄），拖拽移动、8 向手柄缩放；每个签章点有**序号角标**
+- **微调**：方向键移动（`Shift` 加速 10px），`Delete` 删除，`Esc` 取消拖动
+- **列表面板**：按签署方分组显示（色点+数量），点击跳转选中、删除（悬停显现）；跨页保留各页签章
+- **工具栏**：模式切换 / 当前公章缩略图（名字=当前用户）/ 打开本地文件 / URL 加载 / 签署方下拉 / 复制 JSON / 缩放 / 翻页 / 网格 / 清空
 
 ## 坐标约定
 
@@ -230,7 +326,7 @@ cd pdf-stamp-picker && python3 -m http.server 8899
 # 打开 http://127.0.0.1:8899/demo/index.html
 ```
 
-Demo 展示：签章模式（拖动公章放置）/ 容器模式（多用户多签章）/ 弹窗模式 / 更换签章图 / JSON 复制。
+Demo 展示：容器模式（多用户多签章/三种模式/动态签署方）/ 纯画布模式 / 弹窗模式 / JSON 分组输出 / 签署方动态增删。
 
 ## 目录
 
