@@ -3,7 +3,7 @@ const assert = require('assert');
 const PdfStampPickerModule = require('/var/minis/workspace/pdf-stamp-picker/pdf-stamp-picker.js');
 const { _internals, version } = PdfStampPickerModule;
 
-assert.strictEqual(version, '4.8.3');
+assert.strictEqual(version, '4.8.4');
 
 const { buildJSON, buildFlatJSON, genId, normalizeRotation } = _internals;
 
@@ -162,3 +162,16 @@ const docNoHash = buildJSON({ docName: 'a.pdf', totalPages: 1, currentPage: 1, w
 assert.strictEqual('hash' in docNoHash.document, false);
 
 console.log('=== v4 单测全部通过（.../哈希输出） ===');
+
+// --- v4.8.4: importJSON 无 image 时按签章点用户生成章图（不统一用当前用户章图） ---
+// 纯逻辑验证: parseImportJSON 保持 userId 正确
+const p3 = parseImportJSON({
+  users: [
+    { user: { id: 'u1', name: '甲方' }, stamps: [{ id: 'x1', x: 1, y: 2 }] },
+    { user: { id: 'u2', name: '乙方' }, stamps: [{ id: 'x2', x: 3, y: 4 }] }
+  ]
+});
+assert.strictEqual(p3.stamps[0].userId, 'u1');
+assert.strictEqual(p3.stamps[1].userId, 'u2', '甲乙签章点 userId 应各自保持');
+
+console.log('=== v4 单测全部通过（.../导入解析/哈希/按用户章图） ===');

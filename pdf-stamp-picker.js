@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.3';
+  var VERSION = '4.8.4';
 
   /* ====================== 常量 ====================== */
 
@@ -1538,7 +1538,7 @@
    * @param {Object} json toJSON()/toFlatJSON() 输出
    * @param {Object} [opts] { replace=true 替换现有签章 }
    */
-  PdfStampPicker.prototype.importJSON = function (json, opts) {
+  PdfStampPicker.prototype.importJSON = async function (json, opts) {
     opts = opts || {};
     var self = this;
     var parsed = parseImportJSON(json);   // 纯函数：结构解析（含类型检查，可单测）
@@ -1563,20 +1563,29 @@
 
     var firstPage = 0;
     var batchCount = 0;
-    stamps.forEach(function (st) {
-      if (!st || typeof st.x !== 'number' || typeof st.y !== 'number') return;
+    var savedUserId = this._currentUserId;   // 记录导入前用户，结束后还原
+    for (var i = 0; i < stamps.length; i++) {
+      var st = stamps[i];
+      if (!st || typeof st.x !== 'number' || typeof st.y !== 'number') continue;
+      var targetUserId = st.userId || self._currentUserId;
+      // ★ 无 image 的签章点：按签章点所属用户生成章图（避免全部用当前用户章图导致公章文字错误）
+      if (!st.image && targetUserId) {
+        if (self._currentUserId !== targetUserId) self._currentUserId = targetUserId;  // 临时切换（仅内部）
+        await self._ensureStampImage();
+      }
       self.addStamp({
         x: st.x, y: st.y,
         width: st.width, height: st.height,
         page: st.page || self._pageNumber,
-        userId: st.userId || self._currentUserId,
+        userId: targetUserId,
         note: st.note || '',
         image: st.image || null,
         _batch: true   // 批量模式：跳过中间渲染/历史/事件
       });
       batchCount++;
       if (st.page && (!firstPage || st.page < firstPage)) firstPage = st.page;
-    });
+    }
+    this._currentUserId = savedUserId;   // 还原导入前用户（不改变外部状态）
 
     // 批量收尾：一次历史 + 一次渲染 + 批量事件（性能优化）
     if (batchCount) {
@@ -1605,10 +1614,10 @@
       self._emit('change', self.getSelection());
     };
     if (firstPage && firstPage !== this._pageNumber && this._pdfMode === 'pdfjs' && this._pdf) {
-      return this.gotoPage(firstPage).then(go);
+      await this.gotoPage(firstPage);
     }
     go();
-    return Promise.resolve();
+    return;
   };
 
   PdfStampPicker.prototype.copyJSON = function () {
