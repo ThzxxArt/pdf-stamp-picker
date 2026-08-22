@@ -3,7 +3,7 @@ const assert = require('assert');
 const PdfStampPickerModule = require('/var/minis/workspace/pdf-stamp-picker/pdf-stamp-picker.js');
 const { _internals, version } = PdfStampPickerModule;
 
-assert.strictEqual(version, '4.7.7');
+assert.strictEqual(version, '4.7.8');
 
 const { buildJSON, buildFlatJSON, genId, normalizeRotation } = _internals;
 

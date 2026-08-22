@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.7';
+  var VERSION = '4.7.8';
 
   /* ====================== 常量 ====================== */
 
@@ -1948,6 +1948,9 @@
       if (this._pdfMode === 'pdfjs') {
         this._renderPage().then(function () { self._paint(); });
       } else this._paint();
+    } else if (z !== null && typeof z === 'number' && this._displayW) {
+      // 数字 zoom：页面尺寸不变，但容器 resize 后页面位置可能变化 → 重绘 overlay 保证选中框/章图贴合
+      this._paint();
     }
   };
 
@@ -2124,7 +2127,15 @@
           if (dist > 0 && this._pinch.dist > 0) {
             var ratio = dist / this._pinch.dist;
             // 公章固定大小：双指统一缩放页面（章在 PDF 坐标上大小不变）
-            this.setZoom(this._pinch.zoom * ratio);
+            // rAF 节流：pointermove 高频触发，合并到一帧只重排一次（防触屏卡顿）
+            var self2 = this;
+            if (!this._pinchRaf) {
+              this._pinchRaf = requestAnimationFrame(function () {
+                self2._pinchRaf = 0;
+                self2.setZoom(self2._pinch.zoom * self2._pinch.ratio);
+              });
+            }
+            this._pinch.ratio = ratio;
           }
         }
         return;
@@ -2566,7 +2577,12 @@
     return Promise.all(imgs.map(function (im) {
       return new Promise(function (res) {
         if (im.complete && im.naturalWidth) return res();
-        im.onload = res;
+        // 追加回调而非覆盖：保留 _imgFor 设置的 _schedulePaint 重绘回调
+        var origOnload = im.onload;
+        im.onload = function () {
+          if (typeof origOnload === 'function') { try { origOnload(); } catch (e) { /* ignore */ } }
+          res();
+        };
         im.onerror = res;
       });
     })).then(function () {
@@ -2601,6 +2617,13 @@
     this._pdf = null;
     this._ptrs = null;
     this._pinch = null;
+    if (this._pinchRaf) cancelAnimationFrame(this._pinchRaf);
+    this._pinchRaf = 0;
+    // 释放缓存引用（实例被外部持有时也能被 GC 回收）
+    this._imgCache = null;
+    this._pdfBytes = null;
+    this._pdfHash = null;
+    this._pdfHashPromise = null;
     if (this._root && this._root.parentNode) this._root.parentNode.removeChild(this._root);
     this._listeners = {};
   };
