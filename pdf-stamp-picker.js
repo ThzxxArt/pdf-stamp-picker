@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.8';
+  var VERSION = '4.7.9';
 
   /* ====================== 常量 ====================== */
 
@@ -1173,7 +1173,7 @@
     if (this._resizeRaf) cancelAnimationFrame(this._resizeRaf);
     this._resizeRaf = requestAnimationFrame(function () {
       self._resizeRaf = 0;
-      self._onResize(); // 布局随面板显隐自适应
+      self._applyResize(); // 布局随面板显隐自适应（直接走执行层，避免双重 rAF）
     });
     return this;
   };
@@ -1506,6 +1506,7 @@
     if (opts.replace !== false) this._stamps = [];
 
     var firstPage = 0;
+    var batchCount = 0;
     stamps.forEach(function (st) {
       if (!st || typeof st.x !== 'number' || typeof st.y !== 'number') return;
       self.addStamp({
@@ -1514,10 +1515,19 @@
         page: st.page || self._pageNumber,
         userId: st.userId || self._currentUserId,
         note: st.note || '',
-        image: st.image || null
+        image: st.image || null,
+        _batch: true   // 批量模式：跳过中间渲染/历史/事件
       });
+      batchCount++;
       if (st.page && (!firstPage || st.page < firstPage)) firstPage = st.page;
     });
+
+    // 批量收尾：一次历史 + 一次渲染 + 批量事件（性能优化）
+    if (batchCount) {
+      this._pushHistory();
+      this._renderList();
+      this._emit('stampadd', { batch: batchCount });
+    }
 
     // 合并历史：整体导入作为一步撤销
     if (this._historyIdx > baseIdx) {
@@ -1568,18 +1578,27 @@
   /** 轻提示（内置，单例复用防 DOM 堆积） */
   PdfStampPicker.prototype._toast = function (msg, ms) {
     if (typeof document === 'undefined') return;
+    var self = this;
     var el = document.body.querySelector('.psp-toast');
     if (!el) {
       el = document.createElement('div');
       el.className = 'psp-toast';
       document.body.appendChild(el);
     }
+    // 最小展示时长：新消息不早于 600ms 消失（防快速连续 toast 闪烁）
+    var now = Date.now();
+    var shownAt = el._shownAt || 0;
+    var remain = ms || 1600;
+    if (shownAt && now - shownAt < 600) {
+      remain = Math.max(remain, 600 - (now - shownAt) + (ms || 1600));
+    }
+    el._shownAt = now;
     el.textContent = msg;
     el.classList.remove('psp-toast-hide');
     clearTimeout(this._toastTimer);
     this._toastTimer = setTimeout(function () {
       el.classList.add('psp-toast-hide');
-    }, ms || 1600);
+    }, remain);
   };
 
   /**
@@ -1612,11 +1631,14 @@
     };
     this._stamps.push(stamp);
     this._activeId = stamp.id;
-    this._pushHistory();
-    this._renderList();
-    this._emit('stampadd', stamp);
-    this._checkOverlap(stamp);
-    this._emit('change', this.getSelection());
+    // 批量模式（importJSON）：跳过中间渲染/历史/事件，由批量收尾统一处理（性能优化）
+    if (!sel._batch) {
+      this._pushHistory();
+      this._renderList();
+      this._emit('stampadd', stamp);
+      this._checkOverlap(stamp);
+      this._emit('change', this.getSelection());
+    }
     return stamp;
   };
 
@@ -1940,6 +1962,16 @@
   };
 
   PdfStampPicker.prototype._onResize = function () {
+    var self = this;
+    // rAF 防抖：ResizeObserver/window.resize 高频触发时合并到一帧（避免连续重渲染）
+    if (this._resizeRaf) return;
+    this._resizeRaf = requestAnimationFrame(function () {
+      self._resizeRaf = 0;
+      self._applyResize();
+    });
+  };
+
+  PdfStampPicker.prototype._applyResize = function () {
     if (this._destroyed) return;
     var z = this._options.zoom;
     if (z === 'fit-width' || z === 'fit-page') {
