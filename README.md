@@ -479,7 +479,7 @@ pdf-stamp-picker/
 ├── pdf-stamp-picker.d.ts    # TypeScript 类型声明
 ├── package.json             # npm 包元数据（main/module/types/exports）
 ├── LICENSE                  # MIT
-├── INTEGRATION.md           # 真实项目集成指南（AngularJS/Vue3/React/原生/弹窗/CORS）
+├── INTEGRATION.md           # 真实项目集成指南（AngularJS/Vue2/Vue3/React/原生/弹窗/CORS，全框架实测）
 ├── README.md                # 完整文档（含第三方接口对接示例）
 ├── demo/
 │   ├── index.html           # Demo（多用户多签章/纯画布/弹窗）

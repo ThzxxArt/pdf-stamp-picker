@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Vue 2 集成冒烟测试</title>
+<script src="../vendor/vue.min.js"></script>
+<script src="../vendor/pdf.min.js"></script>
+<script src="../pdf-stamp-picker.js"></script>
+<style>body{font-family:sans-serif;background:#f0f2f5;padding:16px;margin:0}#stage{width:100%;height:520px;background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.12);overflow:hidden}#log{font:12px monospace;margin-top:12px;white-space:pre-wrap;color:#1a73e8}</style>
+</head>
+<body>
+<div id="app">
+  <h3>Vue 2 集成测试（Options API）</h3>
+  <div ref="stageEl" style="width:100%;height:520px;display:block"></div>
+  <div style="margin-top:10px">
+    <button @click="confirm">确认签章($refs)</button>
+    <button @click="openModal">弹窗模式</button>
+  </div>
+  <pre id="v2log">{{ log }}</pre>
+</div>
+
+<script>
+new Vue({
+  el: '#app',
+  data: { log: '等待…' },
+  mounted() {
+    this.picker = new PdfStampPicker(this.$refs.stageEl, {
+      users: [
+        { id: 'a1', name: '甲方', color: '#4285f4' },
+        { id: 'b1', name: '乙方', color: '#ea4335' }
+      ],
+      mode: 'stamp'
+    });
+    this.picker.load({ url: 'test.pdf', headers: { 'X-Vue2': '1' } });
+    var self = this;
+    this.picker.on('stampadd', function () { self.log = 'Vue2 收到 stampadd 事件 ✓'; });
+  },
+  beforeDestroy() { if (this.picker) this.picker.destroy(); },
+  methods: {
+    confirm() {
+      var j = this.picker ? this.picker.toJSON() : null;
+      this.log = j ? '确认: users=' + j.users.length + ' hash=' + (j.document.hash || 'null').slice(0, 12) : 'picker 未就绪';
+    },
+    openModal() {
+      var self = this;
+      PdfStampPicker.openModal({
+        source: { url: 'test.pdf', headers: { 'X-M': 'v2' } },
+        users: [{ id: 'a1', name: '甲方' }, { id: 'b1', name: '乙方' }],
+        title: 'Vue2 弹窗',
+        confirmText: '确认签章点',
+        requireAllUsers: true,
+        width: 800, height: 600
+      }).then(function (j) {
+        self.log = j ? '弹窗确认: ' + j.users.length + ' 组' : '弹窗取消';
+      });
+    }
+  }
+});
+</script>
+</body>
+</html>

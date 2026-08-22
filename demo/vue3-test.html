@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Vue 3 集成冒烟测试</title>
+<script src="../vendor/vue.global.prod.js"></script>
+<script src="../vendor/pdf.min.js"></script>
+<script src="../pdf-stamp-picker.js"></script>
+<style>body{font-family:sans-serif;background:#f0f2f5;padding:16px;margin:0}#stage{width:100%;height:520px;background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.12);overflow:hidden}#log{font:12px monospace;margin-top:12px;white-space:pre-wrap;color:#1a73e8}</style>
+</head>
+<body>
+<div id="app">
+  <h3>Vue 3 集成测试（Composition API）</h3>
+  <div ref="stageEl" style="width:100%;height:520px;display:block"></div>
+  <div style="margin-top:10px">
+    <button @click="confirm">确认签章($refs)</button>
+    <button @click="openModal">弹窗模式</button>
+  </div>
+  <pre id="vlog">{{ log }}</pre>
+</div>
+
+<script>
+const { createApp, ref, onMounted, onBeforeUnmount } = Vue;
+
+createApp({
+  setup() {
+    const stageEl = ref(null);
+    const log = ref('等待…');
+    let picker = null;
+
+    onMounted(() => {
+      picker = new PdfStampPicker(stageEl.value, {
+        users: [
+          { id: 'a1', name: '甲方', color: '#4285f4' },
+          { id: 'b1', name: '乙方', color: '#ea4335' }
+        ],
+        mode: 'stamp'
+      });
+      picker.load({ url: 'test.pdf', headers: { 'X-Vue3': '1' } });
+      picker.on('stampadd', () => { log.value = 'Vue3 收到 stampadd 事件 ✓'; });
+    });
+
+    onBeforeUnmount(() => { if (picker) picker.destroy(); });
+
+    const confirm = () => {
+      const j = picker ? picker.toJSON() : null;
+      log.value = j ? '确认: users=' + j.users.length + ' hash=' + (j.document.hash || 'null').slice(0, 12) : 'picker 未就绪';
+    };
+
+    const openModal = () => {
+      PdfStampPicker.openModal({
+        source: { url: 'test.pdf', headers: { 'X-M': 'v' } },
+        users: [{ id: 'a1', name: '甲方' }, { id: 'b1', name: '乙方' }],
+        title: 'Vue3 弹窗',
+        confirmText: '确认签章点',
+        requireAllUsers: true,
+        width: 800, height: 600
+      }).then(function (j) {
+        log.value = j ? '弹窗确认: ' + j.users.length + ' 组' : '弹窗取消';
+      });
+    };
+
+    return { stageEl, log, confirm, openModal };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

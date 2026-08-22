@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>React 18 集成冒烟测试</title>
+<script src="../vendor/react.production.min.js"></script>
+<script src="../vendor/react-dom.production.min.js"></script>
+<script src="../vendor/pdf.min.js"></script>
+<script src="../pdf-stamp-picker.js"></script>
+<style>body{font-family:sans-serif;background:#f0f2f5;padding:16px;margin:0}#stage{width:100%;height:520px;background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.12);overflow:hidden}#log{font:12px monospace;margin-top:12px;white-space:pre-wrap;color:#1a73e8}</style>
+</head>
+<body>
+<div id="root"></div>
+<pre id="log">等待…</pre>
+<script>
+const { useEffect, useRef, useState } = React;
+
+function StampPickerApp() {
+  const stageRef = useRef(null);
+  const pickerRef = useRef(null);
+  const [json, setJson] = useState(null);
+  const [log, setLog] = useState('等待…');
+
+  // 挂载：创建实例 + 加载 PDF；卸载：销毁
+  useEffect(() => {
+    if (!stageRef.current) return;
+    const picker = new PdfStampPicker(stageRef.current, {
+      users: [
+        { id: 'a1', name: '甲方', color: '#4285f4' },
+        { id: 'b1', name: '乙方', color: '#ea4335' }
+      ],
+      mode: 'stamp'
+    });
+    pickerRef.current = picker;
+    picker.load({ url: 'test.pdf', headers: { 'X-React': '1' } });
+    // 库事件 → React 状态（setState 自动触发重渲染）
+    picker.on('stampadd', () => setLog('React 收到 stampadd 事件 ✓'));
+    return () => picker.destroy();   // 卸载清理
+  }, []);
+
+  const confirm = () => {
+    const j = pickerRef.current ? pickerRef.current.toJSON() : null;
+    setJson(j);
+    setLog(j ? '确认: users=' + j.users.length + ' hash=' + (j.document.hash || 'null').slice(0, 12) : 'picker 未就绪');
+  };
+
+  const openModal = () => {
+    PdfStampPicker.openModal({
+      source: { url: 'test.pdf', headers: { 'X-M': 'r' } },
+      users: [{ id: 'a1', name: '甲方' }, { id: 'b1', name: '乙方' }],
+      title: 'React 弹窗',
+      confirmText: '确认签章点',
+      requireAllUsers: true,
+      width: 800, height: 600
+    }).then(function (j) {
+      setLog(j ? '弹窗确认: ' + j.users.length + ' 组' : '弹窗取消');
+    });
+  };
+
+  return React.createElement('div', null,
+    React.createElement('h3', null, 'React 18 集成测试（函数组件 + useEffect）'),
+    React.createElement('div', { ref: stageRef, style: { width: '100%', height: '520px', display: 'block' } }),
+    React.createElement('div', { style: { marginTop: 10 } },
+      React.createElement('button', { onClick: confirm }, '确认签章($state)'),
+      React.createElement('button', { onClick: openModal }, '弹窗模式')
+    ),
+    React.createElement('pre', { id: 'rlog' }, log)
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(StampPickerApp));
+</script>
+</body>
+</html>

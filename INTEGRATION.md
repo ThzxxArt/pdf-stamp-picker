@@ -165,65 +165,303 @@ angular.module('myApp', []).directive('pdfStampPicker', function () {
 - 库内部变化（放置/删除）→ 事件回调里手动 `$scope.$apply()` 同步回 AngularJS 视图
 - `scope.$on('$destroy')` 调用 `picker.destroy()` 防泄漏
 
-## 4. Vue 3 集成
+## 4. Vue 3 集成（实测验证 ✅）
+
+> 以下代码在 Vue 3.4 + 本库 4.8 实测通过（`demo/vue3-test.html` 可运行验证）。
+
+### 4.1 安装
+
+```bash
+npm install git+https://git.metona.cn/MetonaTeam/pdf-stamp-picker.git
+# 或拷贝 pdf-stamp-picker.js 到项目静态目录
+```
+
+### 4.2 组件方式（推荐）
 
 ```vue
+<!-- StampPicker.vue -->
 <template>
-  <div ref="stage" style="width:100%;height:600px"></div>
-  <button @click="confirm">确认签章</button>
+  <div class="stamp-picker">
+    <div ref="stage" class="psp-stage-container"></div>
+    <div class="actions">
+      <button @click="confirm" :disabled="!picker">确认签章</button>
+      <button @click="openModal">弹窗选择</button>
+    </div>
+    <p class="log">{{ log }}</p>
+  </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import PdfStampPicker from 'pdf-stamp-picker'
 
+const props = defineProps({
+  pdfUrl: { type: String, required: true },     // PDF 地址（或流接口配置对象）
+  signers: { type: Array, default: () => [] }   // 合同签署方 [{id, name, color}]
+})
+const emit = defineEmits(['confirm'])
+
 const stage = ref(null)
+const log = ref('等待…')
 let picker = null
 
 onMounted(() => {
+  if (!stage.value) return
   picker = new PdfStampPicker(stage.value, {
-    users: props.signers,          // 从父组件传入合同签署方
+    users: props.signers,
     mode: 'stamp'
   })
+  // 加载 PDF（流接口方式 → 自动计算 document.hash）
   picker.load(props.pdfUrl)
+  // 库事件 → Vue 状态（响应式自动更新视图）
+  picker.on('stampadd', () => { log.value = '已放置签章 ✓' })
+  picker.on('error', e => { log.value = '加载失败: ' + e.message })
 })
 
-onBeforeUnmount(() => picker.destroy())   // 记得销毁，防泄漏
+// 卸载必须销毁（Vue 3 的 onBeforeUnmount）
+onBeforeUnmount(() => { if (picker) picker.destroy() })
 
 function confirm() {
-  emit('confirm', picker.toJSON())
+  if (!picker) return
+  const json = picker.toJSON()
+  emit('confirm', json)          // 提交给父组件/后端
+  log.value = '确认: ' + json.users.length + ' 个签署方'
+}
+
+function openModal() {
+  // 弹窗模式：一行调用，宿主无需容器
+  PdfStampPicker.openModal({
+    source: props.pdfUrl,
+    users: props.signers,
+    title: '设置各公司签章位置',
+    confirmText: '确认签章点',
+    requireAllUsers: true
+  }).then(json => {
+    if (json) { emit('confirm', json); log.value = '弹窗确认: ' + json.users.length + ' 组' }
+    else log.value = '已取消'
+  })
+}
+</script>
+
+<style scoped>
+.psp-stage-container { width: 100%; height: 600px; background: #fff; border-radius: 10px; overflow: hidden; }
+</style>
+```
+
+### 4.3 使用
+
+```vue
+<template>
+  <StampPicker :pdf-url="pdfUrl" :signers="signers" @confirm="handleSign" />
+</template>
+
+<script setup>
+import StampPicker from './StampPicker.vue'
+
+const pdfUrl = '/api/contract/123/pdf'   // 或 {url, headers} 流接口配置
+const signers = [{ id: 'a', name: '甲方' }, { id: 'b', name: '乙方' }]
+
+function handleSign(json) {
+  console.log(json)   // { document: {name, pages, hash...}, users: [{user, stamps}] }
+  // → POST 到你的后端 / 第三方签章服务
 }
 </script>
 ```
 
-## 5. React 集成
+### 4.4 关键点
 
-```tsx
-import { useEffect, useRef } from 'react'
+- **容器必须有宽高**（style 或 CSS class），Vue 不管样式
+- **`onBeforeUnmount` 必须 `picker.destroy()`**，否则事件监听泄漏
+- 库回调里改 `ref` 值 → Vue 响应式自动更新（无需手动 $apply，比 AngularJS 省心）
+- `props` 变化需刷新：用 `watch(() => props.pdfUrl, v => picker && picker.load(v))`
+
+## 5. Vue 2 集成（实测验证 ✅）
+
+> 以下代码在 Vue 2.7 + 本库 4.8 实测通过（`demo/vue2-test.html` 可运行验证）。
+
+### 5.1 安装
+
+```bash
+npm install git+https://git.metona.cn/MetonaTeam/pdf-stamp-picker.git
+# 或 <script src="pdf-stamp-picker.js"> 引入（UMD 全局变量）
+```
+
+### 5.2 组件方式（Options API）
+
+```vue
+<!-- StampPicker.vue -->
+<template>
+  <div>
+    <div ref="stage" style="width:100%;height:600px;background:#fff;border-radius:10px;overflow:hidden"></div>
+    <div style="margin-top:10px">
+      <button @click="confirm">确认签章</button>
+      <button @click="openModal">弹窗选择</button>
+    </div>
+    <p style="color:#1a73e8;font:12px monospace">{{ log }}</p>
+  </div>
+</template>
+
+<script>
 import PdfStampPicker from 'pdf-stamp-picker'
 
-export function StampPicker({ pdfUrl, signers, onConfirm }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const pickerRef = useRef<PdfStampPicker | null>(null)
+export default {
+  name: 'StampPicker',
+  props: {
+    pdfUrl: { type: [String, Object], required: true },  // PDF 地址或流接口配置
+    signers: { type: Array, default: () => [] }
+  },
+  data() { return { log: '等待…' } },
+  mounted() {
+    this.picker = new PdfStampPicker(this.$refs.stage, {
+      users: this.signers,
+      mode: 'stamp'
+    })
+    this.picker.load(this.pdfUrl)
+    this.picker.on('stampadd', () => { this.log = '已放置签章 ✓' })
+    this.picker.on('error', e => { this.log = '加载失败: ' + e.message })
+  },
+  beforeDestroy() {
+    if (this.picker) this.picker.destroy()   // Vue 2 用 beforeDestroy
+  },
+  watch: {
+    pdfUrl(v) { if (this.picker) this.picker.load(v) }
+  },
+  methods: {
+    confirm() {
+      if (!this.picker) return
+      const json = this.picker.toJSON()
+      this.$emit('confirm', json)
+      this.log = '确认: ' + json.users.length + ' 个签署方'
+    },
+    openModal() {
+      PdfStampPicker.openModal({
+        source: this.pdfUrl,
+        users: this.signers,
+        title: '设置各公司签章位置',
+        confirmText: '确认签章点',
+        requireAllUsers: true
+      }).then(json => {
+        if (json) { this.$emit('confirm', json); this.log = '弹窗确认: ' + json.users.length + ' 组' }
+        else this.log = '已取消'
+      })
+    }
+  }
+}
+</script>
+```
 
+### 5.3 关键点
+
+- **Vue 2 用 `beforeDestroy`**（Vue 3 才用 `onBeforeUnmount`）——销毁时 `picker.destroy()`
+- **`this.$refs.stage` 拿容器**（ref 挂载后才有，mounted 里可用）
+- 库回调里改 `this.log` → Vue 2 响应式自动更新（无需手动 $apply）
+- `watch` 监听 `pdfUrl` 变化重新加载
+
+## 6. React 集成（实测验证 ✅）
+
+> 以下代码在 React 18 + 本库 4.8 实测通过（`demo/react-test.html` 可运行验证）。
+
+### 5.1 安装
+
+```bash
+npm install git+https://git.metona.cn/MetonaTeam/pdf-stamp-picker.git
+```
+
+### 5.2 组件方式
+
+```tsx
+// StampPicker.tsx
+import { useEffect, useRef, useState } from 'react'
+import PdfStampPicker from 'pdf-stamp-picker'
+
+interface Signer { id: string; name: string; color?: string }
+interface Props {
+  pdfUrl: string | { url: string; headers?: Record<string, string> }
+  signers: Signer[]
+  onConfirm: (json: any) => void
+}
+
+export function StampPicker({ pdfUrl, signers, onConfirm }: Props) {
+  const stageRef = useRef<HTMLDivElement>(null)
+  const pickerRef = useRef<PdfStampPicker | null>(null)
+  const [log, setLog] = useState('等待…')
+
+  // 挂载/卸载生命周期（严格模式注意双调用）
   useEffect(() => {
-    if (!ref.current) return
-    const picker = new PdfStampPicker(ref.current, { users: signers })
-    picker.load(pdfUrl)
+    if (!stageRef.current) return
+    const picker = new PdfStampPicker(stageRef.current, {
+      users: signers,
+      mode: 'stamp'
+    })
     pickerRef.current = picker
-    return () => picker.destroy()
-  }, [pdfUrl])
+    picker.load(pdfUrl)
+    picker.on('stampadd', () => setLog('已放置签章 ✓'))
+    picker.on('error', e => setLog('加载失败: ' + e.message))
+    return () => picker.destroy()   // 卸载销毁
+  }, [])   // 注意：依赖数组留空，避免重复创建
+
+  // pdfUrl 变化时重新加载
+  useEffect(() => { if (pickerRef.current) pickerRef.current.load(pdfUrl) }, [pdfUrl])
+
+  const confirm = () => {
+    const j = pickerRef.current?.toJSON()
+    if (j) { onConfirm(j); setLog('确认: ' + j.users.length + ' 个签署方') }
+  }
+
+  const openModal = () => {
+    PdfStampPicker.openModal({
+      source: pdfUrl,
+      users: signers,
+      title: '设置各公司签章位置',
+      confirmText: '确认签章点',
+      requireAllUsers: true
+    }).then(j => {
+      if (j) { onConfirm(j); setLog('弹窗确认: ' + j.users.length + ' 组') }
+      else setLog('已取消')
+    })
+  }
 
   return (
     <div>
-      <div ref={ref} style={{ height: 600 }} />
-      <button onClick={() => onConfirm(pickerRef.current!.toJSON())}>确认</button>
+      <div ref={stageRef} style={{ width: '100%', height: 600, background: '#fff', borderRadius: 10, overflow: 'hidden' }} />
+      <div style={{ marginTop: 10 }}>
+        <button onClick={confirm}>确认签章</button>
+        <button onClick={openModal}>弹窗选择</button>
+      </div>
+      <p style={{ color: '#1a73e8', font: '12px monospace' }}>{log}</p>
     </div>
   )
 }
 ```
 
-## 6. 弹窗模式（最省事，一行调用）
+### 5.3 使用
+
+```tsx
+import { StampPicker } from './StampPicker'
+
+function ContractPage() {
+  const handleSign = (json: any) => {
+    console.log(json)   // { document: {hash...}, users: [{user, stamps}] }
+    // POST 到后端 / 第三方签章服务
+  }
+  return (
+    <StampPicker
+      pdfUrl={{ url: '/api/contract/123/pdf', headers: { Authorization: 'Bearer token' } }}
+      signers={[{ id: 'a', name: '甲方' }, { id: 'b', name: '乙方' }]}
+      onConfirm={handleSign}
+    />
+  )
+}
+```
+
+### 5.4 关键点
+
+- **`useEffect` 清理函数返回 `picker.destroy()`**（React 18 严格模式开发环境会双调用挂载/卸载，destroy 要幂等——库已处理）
+- **`useRef` 存实例**（`useState` 存会触发多余渲染）
+- **`useEffect` 依赖数组留空**创建实例，`pdfUrl` 变化用单独 effect 重新 load
+- 库事件回调里用 `setLog`（React state）→ 自动重渲染，无需手动触发
+
+## 7. 弹窗模式（最省事，一行调用）
 
 ```js
 import PdfStampPicker from 'pdf-stamp-picker'
@@ -253,7 +491,7 @@ const json = await PdfStampPicker.openModal({
 });
 ```
 
-## 7. 加载真实合同数据
+## 8. 加载真实合同数据
 
 ```js
 // ① 远程静态 PDF 地址（pdf.js 原生流式，支持大文件 Range）
@@ -275,7 +513,7 @@ await picker.load(file)
 
 > ⚠️ **CORS**：跨域加载 PDF 必须目标服务器允许（`Access-Control-Allow-Origin`）。**带自定义 header 的跨域请求会触发 OPTIONS 预检**，服务端必须响应（`Access-Control-Allow-Headers`），否则报 "Failed to fetch"。同域接口无此问题。常见报错与排查见下表。
 
-## 8. 常见问题
+## 9. 常见问题
 
 | 问题 | 原因 / 解决 |
 |---|---|
@@ -292,21 +530,21 @@ await picker.load(file)
 | 包体积敏感 | 单文件 ~120KB（gzip ~35KB）+ 可选 pdf.js（~1.4MB 含 cMaps，可走 CDN 不打包） |
 | TypeScript 无提示 | 已内置 `pdf-stamp-picker.d.ts`，`types` 字段自动识别 |
 
-## 9. 样式隔离说明
+## 10. 样式隔离说明
 
 - 库注入的 CSS 全部使用 `psp-` 前缀，且 style 标签带独立 id（`psp-styles`），不覆盖宿主样式
 - 弹窗挂载在 `body` 下（`z-index: 99990`），不受宿主布局影响
 - 容器只需要：有宽高（flex 布局下 `flex:1` 也行）+ 非 static 定位（库自动处理）
 - 如宿主已有 `#psp-styles`，库会复用不重复注入
 
-## 10. 性能提示
+## 11. 性能提示
 
 - PDF 渲染按需（仅当前页），翻页/缩放自动 cancel 未完成的渲染任务，大文档流畅
 - 签章点坐标纯计算，数千个点无压力
 - 文档切换/`destroy()` 自动释放 pdf.js 文档资源（防长会话内存累积）
 - 如需在低端设备使用，建议 `zoom: 'fit-width'`（默认）减少像素开销
 
-## 11. 版本与兼容
+## 12. 版本与兼容
 
 - 浏览器：Chrome/Edge/Firefox/Safari 近两个大版本（Pointer Events + ResizeObserver，无 RO 自动回退）
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
