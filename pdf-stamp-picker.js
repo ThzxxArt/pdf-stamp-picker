@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.2';
+  var VERSION = '4.8.3';
 
   /* ====================== 常量 ====================== */
 
@@ -114,6 +114,7 @@
     '.psp-item-main{flex:1;min-width:0;font-size:11.5px;line-height:1.5}',
     '.psp-item-main .psp-item-sub{color:#80868b;font-size:10.5px;font-variant-numeric:tabular-nums}',
     '.psp-page-badge{display:inline-block;background:rgba(66,133,244,.12);color:#4285f4;border-radius:5px;padding:0 5px;font-size:10px;font-weight:600;margin-right:4px;font-variant-numeric:tabular-nums}',
+    '.psp-note{margin-top:2px;color:#80868b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
     '.psp-del{background:none;border:none;color:#9aa0a6;font-size:15px;cursor:pointer;padding:2px 5px;border-radius:6px;flex:none;line-height:1;opacity:.5;transition:opacity .15s ease,background .15s ease,color .15s ease}',
     '.psp-item:hover .psp-del{opacity:1}',
     '.psp-del:hover{background:rgba(234,67,53,.12);color:#ea4335}',
@@ -1122,7 +1123,11 @@
     if (this._overlay) this._overlay.classList.toggle('psp-stamp-cursor', mode === 'stamp');
     if (mode === 'stamp') {
       var self = this;
-      this._ensureStampImage().then(function () { self._paint(); });
+      var token = (this._userToken = (this._userToken || 0) + 1); // 与用户切换共用 token：防异步章图竞争
+      this._ensureStampImage().then(function () {
+        if (self._destroyed || token !== self._userToken) return;
+        self._paint();
+      });
     }
     return this;
   };
@@ -1144,8 +1149,13 @@
     this._currentUserId = u.id;
     if (this._userSelect) this._userSelect.value = u.id;
     // 内置公章按用户名生成 → 切换用户自动更新公章文字
+    // token 防护：快速切换时旧用户的异步章图返回后不覆盖当前用户
+    var token = (this._userToken = (this._userToken || 0) + 1);
     var self = this;
-    this._ensureStampImage().then(function () { self._paint(); });
+    this._ensureStampImage().then(function () {
+      if (self._destroyed || token !== self._userToken) return;
+      self._paint();
+    });
     return this;
   };
   PdfStampPicker.prototype.getCurrentUser = function () {
