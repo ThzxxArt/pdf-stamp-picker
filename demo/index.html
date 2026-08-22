@@ -184,14 +184,61 @@ document.getElementById('btn-json').addEventListener('click', async () => {
   if (!picker) return;
   await picker.copyJSON();
 });
-document.getElementById('btn-import').addEventListener('click', async () => {
+document.getElementById('btn-import').addEventListener('click', () => {
   if (!picker) return;
-  // 演示导入回显：导出当前 JSON → 清空 → 再导入（模拟换设备/后端回传后继续编辑）
-  const json = picker.toJSON();
-  picker.clear();
-  await picker.importJSON(json);
-  renderJSON(); renderUsers();
-  toast('✅ JSON 已回显（签章点/公章图/签署方全部恢复）');
+  // 弹窗让用户输入/粘贴 JSON（演示真实场景：把后端保存的签章 JSON 回显）
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:14px;padding:20px;width:min(90vw,640px);box-shadow:0 12px 48px rgba(0,0,0,.4);color:#202124';
+  box.innerHTML = '<h3 style="margin:0 0 8px;font-size:14px">导入 JSON 回显签章点</h3>' +
+    '<p style="margin:0 0 10px;font-size:11.5px;color:#80868b">粘贴 <b>toJSON()</b> 导出的 JSON（或后端保存的签章数据），点击回显后自动恢复签署方/签章点/公章图，可继续编辑。</p>';
+  const ta = document.createElement('textarea');
+  ta.style.cssText = 'width:100%;height:260px;box-sizing:border-box;font:11.5px/1.5 monospace;border:1px solid #e3e6ea;border-radius:8px;padding:10px;resize:vertical;outline:none';
+  ta.value = JSON.stringify({
+    users: [
+      { user: { id: 'u1', name: '甲方', color: '#4285f4' }, stamps: [
+        { id: 'demo1', page: 1, x: 120, y: 560, width: 67.9, height: 67.9, unit: 'pt', rotation: 0, note: '示例公章', createdAt: '' }
+      ]},
+      { user: { id: 'u2', name: '乙方', color: '#ea4335' }, stamps: [
+        { id: 'demo2', page: 1, x: 320, y: 480, width: 67.9, height: 67.9, unit: 'pt', rotation: 0, note: '', createdAt: '' }
+      ]}
+    ]
+  }, null, 2);
+  const foot = document.createElement('div');
+  foot.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-top:12px';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = '取消';
+  cancelBtn.style.cssText = 'border:1px solid #e3e6ea;background:#f8f9fa;color:#3c4043;border-radius:8px;padding:7px 18px;font-size:12.5px;cursor:pointer';
+  const okBtn = document.createElement('button');
+  okBtn.textContent = '回显';
+  okBtn.style.cssText = 'background:#1a73e8;color:#fff;border:none;border-radius:8px;padding:7px 24px;font-size:12.5px;font-weight:600;cursor:pointer';
+  foot.appendChild(cancelBtn);
+  foot.appendChild(okBtn);
+  box.appendChild(ta);
+  box.appendChild(foot);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  cancelBtn.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  okBtn.addEventListener('click', async () => {
+    let json;
+    try {
+      json = JSON.parse(ta.value);
+    } catch (e) {
+      toast('❌ JSON 格式错误：' + e.message);
+      return;
+    }
+    try {
+      await picker.importJSON(json);
+      renderJSON(); renderUsers();
+      overlay.remove();
+      toast('✅ JSON 已回显（签署方/签章点/公章图全部恢复）');
+    } catch (e) {
+      toast('❌ 回显失败：' + e.message);
+    }
+  });
 });
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (!picker) return;
