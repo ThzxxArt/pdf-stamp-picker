@@ -2,7 +2,7 @@
 
 纯 JavaScript **PDF 电子签章坐标选择器** —— 单文件、零依赖、UMD 通用模块（浏览器 script / ESM / CommonJS 均可使用）。
 
-> 📦 **真实项目集成请直接看 [INTEGRATION.md](INTEGRATION.md)**（npm/原生/Vue/React 示例、CORS 排查、移动端、样式隔离）
+> 📦 **真实项目集成请直接看 [INTEGRATION.md](INTEGRATION.md)**（AngularJS/Vue2/Vue3/React/原生 全框架实测教程、CORS 排查、移动端、样式隔离）
 
 > 🛡️ **项目铁律（长期维护约束）**：
 > 1. **永远保持单文件** —— 库本体始终是 1 个 `pdf-stamp-picker.js`（UMD），不拆分、不引入构建产物
@@ -10,7 +10,7 @@
 
 > ⚠️ 定位说明：这是**签章点坐标选择器**，不是真实盖章渲染器。输出的是签章位置坐标 + 归属用户，**不输出图片**。页面上的公章图只是拖放定位的视觉载体，放置后显示为带用户颜色的占位框。
 
-v4.6 特性：**默认签章模式（点击即放章，章固定大小不越界）** · **JSON 按用户分组（users[].stamps[]，直接对接第三方签章接口）** · **JSON 导入反显（importJSON + 弹窗传 json 回显签章点/公章图）** · 多签章点 · 多用户动态管理 · 撤销/重做 · 一键弹窗（宽高/模式可配）· 统一加载（含进度/中止）· pdf.js 离线资源（cMaps 中文不乱码）· **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
+v4.8 特性：**默认签章模式（点击即放章，章固定大小不越界，定位/框选立即直观反馈）** · **JSON 按用户分组（users[].stamps[]）** · **document.hash（PDF SHA-256 文件指纹）** · **JSON 导入反显（importJSON + 弹窗传 json + 手动输入回显）** · 多签章点 · 多用户动态管理 · 撤销/重做 · 一键弹窗（宽高/模式/校验可配：requireStamp / requireAllUsers）· **工具栏按钮可配置隐藏** · 统一加载（含进度/中止/哈希）· pdf.js 离线资源（cMaps 中文不乱码）· **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
 
 ## 快速开始（真实项目只需一个容器）
 
@@ -347,7 +347,7 @@ picker.addStamp({ x: 100, y: 600, width: 150, height: 80, note: '公章' });
 picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 ```
 
-## 构造选项（全部 18 项）
+## 构造选项（全部 19 项）
 
 | option | 默认 | 说明 |
 |---|---|---|
@@ -444,8 +444,8 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 ## 交互
 
 - **签章模式（默认）**：点击即放置（完整落定）；拖动微调（拖动中半透明）；**章固定大小不可缩放**（无手柄/Ctrl+滚轮/双指均不缩放章）；点击选中；**不越界**；滚轮=页面滚动
-- **框选**：拖动绘制矩形；`Shift` 锁正方形；完成后自动加入签章列表
-- **点选**：单击放置锚点（双环+准星样式），可拖动移动
+- **框选**：拖动绘制矩形；`Shift` 锁正方形；完成后自动加入签章列表；**放置后立即显示选区框+手柄**（直观反馈）
+- **点选**：单击放置锚点（双环+准星样式），可拖动移动；**点击后立即显示锚点**（直观反馈）
 - **多签章**：点击已有签章点切换选中（章固定大小，选中外发光边框），拖拽移动；框选/点选模式的选区仍带 8 向手柄缩放；每个签章点有**序号角标**
 - **撤销/重做**：工具栏按钮或 Ctrl+Z / Ctrl+Shift+Z（含删除、清空、移动、缩放）
 - **备注编辑**：双击列表项内联编辑签章点备注（note 字段）
@@ -469,31 +469,55 @@ cd pdf-stamp-picker && python3 -m http.server 8899
 # 打开 http://127.0.0.1:8899/demo/index.html
 ```
 
-Demo 展示：容器模式（多用户多签章/三种模式/动态签署方）/ 纯画布模式 / 弹窗模式 / JSON 分组输出 / 签署方动态增删。
+Demo 展示：容器模式（多用户多签章/三种模式/动态签署方/导入 JSON 弹窗回显）/ 纯画布模式 / 弹窗模式（确认校验）/ JSON 分组输出（含 document.hash）/ 工具栏配置。
+
+## 框架集成测试页
+
+各框架集成示例（**均已实测运行**，可直接打开验证）：
+
+```bash
+# 打开对应测试页：
+#   demo/index.html            主 Demo
+#   demo/angularjs-test.html   AngularJS 1.8
+#   demo/vue2-test.html         Vue 2.7
+#   demo/vue3-test.html         Vue 3.4
+#   demo/react-test.html        React 18
+```
+
+> 完整教程见 [INTEGRATION.md](INTEGRATION.md)（每种框架含完整组件代码、生命周期处理、弹窗用法、常见坑）。
 
 ## 目录
 
 ```
 pdf-stamp-picker/
-├── pdf-stamp-picker.js      # 库本体（单文件 ~110KB，零依赖）
+├── pdf-stamp-picker.js      # 库本体（单文件 ~128KB，零依赖）
 ├── pdf-stamp-picker.d.ts    # TypeScript 类型声明
 ├── package.json             # npm 包元数据（main/module/types/exports）
 ├── LICENSE                  # MIT
-├── INTEGRATION.md           # 真实项目集成指南（AngularJS/Vue2/Vue3/React/原生/弹窗/CORS，全框架实测）
+├── INTEGRATION.md           # 真实项目集成指南（AngularJS/Vue2/Vue3/React/原生，全框架实测）
 ├── README.md                # 完整文档（含第三方接口对接示例）
 ├── demo/
-│   ├── index.html           # Demo（多用户多签章/纯画布/弹窗）
+│   ├── index.html           # 主 Demo（多用户多签章/纯画布/弹窗/导入JSON回显）
+│   ├── angularjs-test.html  # AngularJS 1.8 集成测试页
+│   ├── vue2-test.html       # Vue 2.7 集成测试页
+│   ├── vue3-test.html       # Vue 3.4 集成测试页
+│   ├── react-test.html      # React 18 集成测试页
 │   ├── test.pdf             # 测试 PDF（3 页，含 /Rotate 90）
+│   ├── eight-page.pdf       # 8 页测试 PDF（换文档验证）
 │   ├── chinese-cid.pdf      # 中文 GBK CID 测试 PDF（验证 cMaps）
 │   ├── gen_test_pdf.py      # 测试 PDF 生成脚本
 │   └── gen_chinese_pdf.py   # 中文 PDF 生成脚本
-├── vendor/                  # pdf.js 完整离线资源（自动探测加载）
+├── vendor/                  # pdf.js + 框架库（测试用；库零依赖铁律保持）
 │   ├── pdf.min.js           # pdf.js 主库（320KB）
 │   ├── pdf.worker.min.js    # 解析 worker（1.08MB）
-│   └── cMaps/               # 169 个字体映射（中文 PDF 离线不乱码）
+│   ├── cMaps/               # 169 个字体映射（中文 PDF 离线不乱码）
+│   ├── angular.min.js       # AngularJS 1.8（仅测试页用）
+│   ├── vue.min.js           # Vue 2.7（仅测试页用）
+│   ├── vue.global.prod.js   # Vue 3.4（仅测试页用）
+│   └── react*.js            # React 18（仅测试页用）
 └── test/
     ├── coords.test.js       # 坐标转换（4 旋转 × 7 点往返）
-    └── json.test.js         # JSON 结构 / 多用户 / 本地候选探测
+    └── json.test.js         # JSON 结构 / 多用户 / 本地候选探测 / 导入解析 / 哈希
 ```
 
 ## License
