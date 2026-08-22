@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.1';
+  var VERSION = '4.8.2';
 
   /* ====================== 常量 ====================== */
 
@@ -1876,6 +1876,8 @@
       x: sel.x, y: sel.y,
       width: sel.width || 0, height: sel.height || 0
     });
+    // ★ 放置后立即重绘：显示活动选区/锚点（否则用户看不到刚才点击/框选的位置）
+    this._paint();
     this._emit('select', this.getStamps().filter(function (s) { return s.id === stamp.id; })[0] || null);
   };
 
