@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.10';
+  var VERSION = '4.8.0';
 
   /* ====================== 常量 ====================== */
 
@@ -278,6 +278,7 @@
       minSize: 4,
       showGrid: false,
       controls: true,
+      toolbar: null,   // 工具栏按钮显隐配置（null=全部显示）
       showList: true,
       theme: 'dark',
       dpi: DEFAULT_DPI,
@@ -424,10 +425,27 @@
     c.appendChild(root);
   };
 
-  PdfStampPicker.prototype._buildToolbar = function (root) {
-    var self = this;
+  /** 工具栏显隐配置（合并默认；toolbar 传 false 可整体隐藏） */
+  PdfStampPicker.prototype._toolbarConfig = function () {
+    var t = this._options.toolbar;
+    var defaults = {
+      modes: true, open: true, url: true, users: true, copyJson: true,
+      zoom: true, pageNav: true, grid: true, undoRedo: true,
+      panel: true, clear: true, stampThumb: true
+    };
+    if (t === false) { var off = {}; Object.keys(defaults).forEach(function (k) { off[k] = false; }); return off; }
+    if (!t) return defaults;
+    var out = {};
+    Object.keys(defaults).forEach(function (k) { out[k] = t[k] !== undefined ? t[k] : defaults[k]; });
+    return out;
+  };
+
+  PdfStampPicker.prototype._buildToolbar = function (root) {    var self = this;
     var tb = document.createElement('div');
     tb.className = 'psp-toolbar';
+    // 工具栏按钮显隐配置（缺省全部显示；可单独关闭）
+    var T = this._toolbarConfig();
+    var show = function (key) { return T[key] !== false; };
     var ICONS = {
       point: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>',
       rect: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18" opacity=".4"/></svg>',
@@ -459,31 +477,35 @@
     };
     var sep = function () { var s = document.createElement('span'); s.className = 'psp-sep'; tb.appendChild(s); };
 
-    this._btnPoint = btn('point', '定位', '点选模式', function () { self.setMode('point'); });
-    this._btnRect = btn('rect', '框选', '框选模式', function () { self.setMode('rect'); });
-    this._btnStamp = btn('stamp', '签章', '签章模式：点击放置公章（章固定大小）', function () { self.setMode('stamp'); });
-    sep();
+    if (show('modes')) {
+      this._btnPoint = btn('point', '定位', '点选模式', function () { self.setMode('point'); });
+      this._btnRect = btn('rect', '框选', '框选模式', function () { self.setMode('rect'); });
+      this._btnStamp = btn('stamp', '签章', '签章模式：点击放置公章（章固定大小）', function () { self.setMode('stamp'); });
+      sep();
+    }
 
     // 当前签章图缩略图（内置公章按用户名生成，只读展示）
-    var thumbZone = document.createElement('span');
-    thumbZone.className = 'psp-thumb-zone';
-    var thumb = document.createElement('img');
-    thumb.className = 'psp-thumb';
-    thumb.title = '当前签章图（内置公章，名字=当前用户）';
-    thumb.alt = '签章图';
-    thumbZone.appendChild(thumb);
-    var thumbLabel = document.createElement('span');
-    thumbLabel.className = 'psp-thumb-label';
-    thumbLabel.textContent = '当前章';
-    thumbZone.appendChild(thumbLabel);
-    tb.appendChild(thumbZone);
-    this._thumb = thumb;
-    this._thumbLabel = thumbLabel;
-    sep();
+    if (show('stampThumb')) {
+      var thumbZone = document.createElement('span');
+      thumbZone.className = 'psp-thumb-zone';
+      var thumb = document.createElement('img');
+      thumb.className = 'psp-thumb';
+      thumb.title = '当前签章图（内置公章，名字=当前用户）';
+      thumb.alt = '签章图';
+      thumbZone.appendChild(thumb);
+      var thumbLabel = document.createElement('span');
+      thumbLabel.className = 'psp-thumb-label';
+      thumbLabel.textContent = '当前章';
+      thumbZone.appendChild(thumbLabel);
+      tb.appendChild(thumbZone);
+      this._thumb = thumb;
+      this._thumbLabel = thumbLabel;
+      sep();
+    }
 
-    btn('open', '打开', '选择本地 PDF 文件', function () { self._fileInput.click(); });
-    btn('url', 'URL', '从地址加载 PDF / 文件流接口', function () { self._urlbar.classList.toggle('open'); });
-    {
+    if (show('open')) btn('open', '打开', '选择本地 PDF 文件', function () { self._fileInput.click(); });
+    if (show('url')) btn('url', 'URL', '从地址加载 PDF / 文件流接口', function () { self._urlbar.classList.toggle('open'); });
+    if (show('users')) {
       var usel = document.createElement('select');
       this._users.forEach(function (u) {
         var o = document.createElement('option');
@@ -497,36 +519,44 @@
       this._userSelect = usel;
       sep();
     }
-    btn('copy', '复制JSON', '复制全部签章 JSON 到剪贴板', function () { self.copyJSON(); });
+    if (show('copyJson')) btn('copy', '复制JSON', '复制全部签章 JSON 到剪贴板', function () { self.copyJSON(); });
     sep();
 
-    btn('zoomout', '', '缩小', function () { self.setZoom(self._cssScale / 1.25); });
-    this._zoomLabel = document.createElement('span');
-    this._zoomLabel.className = 'psp-zoomval';
-    this._zoomLabel.textContent = '100%';
-    tb.appendChild(this._zoomLabel);
-    btn('zoomin', '', '放大', function () { self.setZoom(self._cssScale * 1.25); });
-    btn('fitw', '适宽', '适应宽度', function () { self.setZoom('fit-width'); });
-    btn('fitp', '适页', '适应页面', function () { self.setZoom('fit-page'); });
-    sep();
-    btn('prev', '', '上一页', function () { self.gotoPage(self._pageNumber - 1); });
-    this._pageLabel = document.createElement('span');
-    this._pageLabel.className = 'psp-pageinfo';
-    this._pageLabel.textContent = '1 / 1';
-    tb.appendChild(this._pageLabel);
-    btn('next', '', '下一页', function () { self.gotoPage(self._pageNumber + 1); });
-    sep();
-    btn('grid', '网格', '网格辅助线', function (s) {
-      var on = !s._options.showGrid;
-      s.setShowGrid(on);
-      var b = s._gridBtn;
-      if (b) b.classList.toggle('active', on);
-    });
-    this._gridBtn = tb.lastChild;
-    btn('undo', '撤销', '撤销上一步操作 (Ctrl+Z)', function () { self.undo(); });
-    btn('redo', '重做', '重做 (Ctrl+Shift+Z)', function () { self.redo(); });
-    btn('panel', '面板', '显示/隐藏签章列表面板', function () { self.toggleList(); });
-    btn('trash', '清除', '删除全部签章点', function () { self.clear(); });
+    if (show('zoom')) {
+      btn('zoomout', '', '缩小', function () { self.setZoom(self._cssScale / 1.25); });
+      this._zoomLabel = document.createElement('span');
+      this._zoomLabel.className = 'psp-zoomval';
+      this._zoomLabel.textContent = '100%';
+      tb.appendChild(this._zoomLabel);
+      btn('zoomin', '', '放大', function () { self.setZoom(self._cssScale * 1.25); });
+      btn('fitw', '适宽', '适应宽度', function () { self.setZoom('fit-width'); });
+      btn('fitp', '适页', '适应页面', function () { self.setZoom('fit-page'); });
+      sep();
+    }
+    if (show('pageNav')) {
+      btn('prev', '', '上一页', function () { self.gotoPage(self._pageNumber - 1); });
+      this._pageLabel = document.createElement('span');
+      this._pageLabel.className = 'psp-pageinfo';
+      this._pageLabel.textContent = '1 / 1';
+      tb.appendChild(this._pageLabel);
+      btn('next', '', '下一页', function () { self.gotoPage(self._pageNumber + 1); });
+      sep();
+    }
+    if (show('grid')) {
+      btn('grid', '网格', '网格辅助线', function (s) {
+        var on = !s._options.showGrid;
+        s.setShowGrid(on);
+        var b = s._gridBtn;
+        if (b) b.classList.toggle('active', on);
+      });
+      this._gridBtn = tb.lastChild;
+    }
+    if (show('undoRedo')) {
+      btn('undo', '撤销', '撤销上一步操作 (Ctrl+Z)', function () { self.undo(); });
+      btn('redo', '重做', '重做 (Ctrl+Shift+Z)', function () { self.redo(); });
+    }
+    if (show('panel')) btn('panel', '面板', '显示/隐藏签章列表面板', function () { self.toggleList(); });
+    if (show('clear')) btn('trash', '清除', '删除全部签章点', function () { self.clear(); });
     root.appendChild(tb);
   };
 

@@ -30,6 +30,12 @@ export interface PdfStampPickerOptions {
   showGrid?: boolean;
   /** 内置工具栏 + 列表（默认开启，宿主无需写任何 HTML/CSS） */
   controls?: boolean;
+  /** 工具栏按钮显隐配置（缺省全部显示；传 false 全部隐藏） */
+  toolbar?: false | {
+    modes?: boolean; open?: boolean; url?: boolean; users?: boolean; copyJson?: boolean;
+    zoom?: boolean; pageNav?: boolean; grid?: boolean; undoRedo?: boolean;
+    panel?: boolean; clear?: boolean; stampThumb?: boolean;
+  };
   /** 签章点列表面板 */
   showList?: boolean;
   /** 主题 */

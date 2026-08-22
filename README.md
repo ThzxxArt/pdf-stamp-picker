@@ -118,6 +118,43 @@ const json = await PdfStampPicker.openModal({
 
 完整参数：`source` `json`（回显已有签章） `title` `users` `currentUser` `width` `height` `mode` `confirmText` `cancelText` `requireStamp`（至少一个签章点） `requireAllUsers`（**每个签署方至少一个签章点**，优先于 requireStamp） `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（透传给选择器）。
 
+## 工具栏按钮配置（弹窗/容器通用）
+
+工具栏按钮可**按需隐藏**（缺省全部显示，容器与弹窗模式行为一致）：
+
+```js
+// 精简工具栏：只留模式切换 + 翻页
+const picker = new PdfStampPicker('#stage', {
+  toolbar: {
+    zoom: false, copyJson: false, grid: false, undoRedo: false,
+    panel: false, clear: false, url: false, open: false, stampThumb: false, users: false
+  }
+});
+
+// 全部隐藏（宿主完全自绘 UI）
+new PdfStampPicker('#stage', { toolbar: false });
+
+// 弹窗模式同样支持（pickerOptions 透传）
+PdfStampPicker.openModal({
+  source: 'a.pdf',
+  pickerOptions: { toolbar: { zoom: false, grid: false } }
+});
+```
+
+| 配置键 | 控制 |
+|---|---|
+| `modes` | 定位/框选/签章 模式按钮组 |
+| `stampThumb` | 公章缩略图 |
+| `open` / `url` | 打开本地文件 / URL 加载 |
+| `users` | 签署方下拉 |
+| `copyJson` | 复制 JSON |
+| `zoom` | 缩小/放大/适宽/适页 |
+| `pageNav` | 上一页/页码/下一页 |
+| `grid` | 网格辅助线 |
+| `undoRedo` | 撤销/重做 |
+| `panel` | 列表折叠 |
+| `clear` | 清除签章 |
+
 ## 坐标选择模式的可选性加载
 
 三种模式（`point` 点选 / `rect` 框选 / `stamp` 签章）**在初始化或加载时即可指定**，不用等加载完再切换：
@@ -320,6 +357,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | `minSize` | `4` | 选区最小尺寸(屏幕px) |
 | `showGrid` | `false` | 网格辅助线 |
 | `controls` | `true` | 内置工具栏 + 列表面板（全 UI 内置） |
+| `toolbar` | 全部显示 | 工具栏按钮显隐配置：`{modes, open, url, users, copyJson, zoom, pageNav, grid, undoRedo, panel, clear, stampThumb}` 各布尔；传 `false` 全部隐藏 |
 | `showList` | `true` | 签章列表面板 |
 | `theme` | `'dark'` | `'dark'`（深色 viewer）/ `'light'`（浅色）——v4.3.1 起真正区分（背景/工具栏/列表联动） |
 | `dpi` | `96` | px 单位换算参考（影响输出 px 字段） |
