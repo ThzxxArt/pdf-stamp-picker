@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.0';
+  var VERSION = '4.8.1';
 
   /* ====================== 常量 ====================== */
 
@@ -82,11 +82,18 @@
     '.psp-toolbar .psp-thumb-zone{display:inline-flex;align-items:center;gap:5px;margin-left:2px}',
     '.psp-toolbar .psp-thumb-label{font-size:10px;color:#9aa0a6;line-height:1.2;max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     /* ===== URL 条 ===== */
-    '.psp-urlbar{display:none;align-items:center;gap:6px;padding:6px 12px;background:#1c1e22;border-bottom:1px solid rgba(255,255,255,.08);flex:none}',
+    '.psp-urlbar{display:none;align-items:center;gap:8px;padding:8px 14px;background:linear-gradient(180deg,#2b2f36,#23262c);border-bottom:1px solid rgba(0,0,0,.35);flex:none;box-shadow:0 2px 8px rgba(0,0,0,.18)}',
     '.psp-urlbar.open{display:flex;animation:pspSlideDown .22s ease}',
-    '.psp-urlbar input{flex:1;background:#2a2d33;color:#e8eaed;border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:6px 10px;font-size:12px;min-width:0;outline:none;transition:border-color .18s ease,box-shadow .18s ease}',
-    '.psp-urlbar input:focus{border-color:#4285f4;box-shadow:0 0 0 3px rgba(66,133,244,.25)}',
-    '.psp-urlbar button{flex:none}',
+    '.psp-urlbar .psp-url-field{flex:1;display:flex;align-items:center;gap:8px;background:#1c1e22;border:1px solid rgba(255,255,255,.14);border-radius:9px;padding:0 10px;transition:border-color .18s ease,box-shadow .18s ease}',
+    '.psp-urlbar .psp-url-field:focus-within{border-color:#4285f4;box-shadow:0 0 0 3px rgba(66,133,244,.22)}',
+    '.psp-urlbar .psp-url-icon{color:#9aa0a6;font-size:13px;flex:none;line-height:1}',
+    '.psp-urlbar input{flex:1;background:transparent;color:#e8eaed;border:none;padding:8px 0;font-size:12.5px;min-width:0;outline:none;font-family:inherit}',
+    '.psp-urlbar input::placeholder{color:#80868b}',
+    '.psp-urlbar .psp-url-go{display:inline-flex;align-items:center;gap:5px;background:linear-gradient(180deg,#5a95f5,#4285f4);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;transition:box-shadow .18s ease,transform .12s ease;font-family:inherit}',
+    '.psp-urlbar .psp-url-go:hover{box-shadow:0 3px 10px rgba(66,133,244,.45)}',
+    '.psp-urlbar .psp-url-go:active{transform:translateY(1px)}',
+    '.psp-urlbar .psp-url-cancel{display:inline-flex;align-items:center;gap:5px;background:transparent;color:#b8bcc4;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer;transition:background .15s ease,color .15s ease;font-family:inherit}',
+    '.psp-urlbar .psp-url-cancel:hover{background:rgba(255,255,255,.1);color:#fff}',
     /* ===== 列表 ===== */
     '.psp-list{width:248px;border-left:1px solid rgba(0,0,0,.1);background:linear-gradient(180deg,#f4f5f7 0%,#eef0f3 100%);color:#202124;display:flex;flex-direction:column;flex:none;min-height:0;box-shadow:-2px 0 8px rgba(60,64,67,.06)}',
     '.psp-list h3{font-size:11px;font-weight:700;padding:14px 14px 8px;color:#5f6368;margin:0;display:flex;justify-content:space-between;align-items:center;letter-spacing:.4px;text-transform:uppercase}',
@@ -347,21 +354,30 @@
 
     if (this._options.controls) this._buildToolbar(root);
 
-    // URL 输入条
+    // URL 输入条（精致样式：图标字段 + 渐变加载 + 幽灵取消）
     var urlbar = document.createElement('div');
     urlbar.className = 'psp-urlbar';
+    var urlField = document.createElement('div');
+    urlField.className = 'psp-url-field';
+    var urlIcon = document.createElement('span');
+    urlIcon.className = 'psp-url-icon';
+    urlIcon.textContent = '🔗';
     var urlInput = document.createElement('input');
     urlInput.type = 'text';
     urlInput.placeholder = '输入 PDF 地址或文件流接口 URL，回车加载…';
+    urlField.appendChild(urlIcon);
+    urlField.appendChild(urlInput);
     var urlBtn = document.createElement('button');
+    urlBtn.className = 'psp-url-go';
     urlBtn.textContent = '加载';
     var urlCancel = document.createElement('button');
+    urlCancel.className = 'psp-url-cancel';
     urlCancel.textContent = '取消';
     var self = this;
     urlBtn.addEventListener('click', function () { self._loadUrl(urlInput.value); });
     urlInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') self._loadUrl(urlInput.value); });
     urlCancel.addEventListener('click', function () { urlbar.classList.remove('open'); });
-    urlbar.appendChild(urlInput);
+    urlbar.appendChild(urlField);
     urlbar.appendChild(urlBtn);
     urlbar.appendChild(urlCancel);
     root.appendChild(urlbar);
