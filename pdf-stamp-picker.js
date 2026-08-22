@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.7.9';
+  var VERSION = '4.7.10';
 
   /* ====================== 常量 ====================== */
 
@@ -2677,6 +2677,7 @@
    * @param {string} [config.currentUser]
    * @param {boolean} [config.closeOnBackdrop=true] 点遮罩关闭
    * @param {boolean} [config.requireStamp=false] 无签章点不允许确认
+   * @param {boolean} [config.requireAllUsers=false] 每个签署方至少一个签章点才允许确认（优先于 requireStamp）
    * @param {Function} [config.onConfirm] 确认回调（可返回 Promise 阻止关闭）
    * @param {Function} [config.onCancel]
    * @param {Object} [config.pickerOptions] 透传给选择器的其他选项
@@ -2772,6 +2773,17 @@
         if (config.requireStamp && stampTotal === 0) {
           picker._toast('请先至少放置一个签章点');
           return;
+        }
+        // 校验每个签署方至少一个签章点（requireAllUsers，优先于 requireStamp）
+        if (config.requireAllUsers) {
+          var missing = [];
+          (json.users || []).forEach(function (g) {
+            if (!(g.stamps && g.stamps.length)) missing.push(g.user.name);
+          });
+          if (missing.length) {
+            picker._toast('以下签署方还未设置签章点：' + missing.join('、'));
+            return;
+          }
         }
         if (config.onConfirm) {
           try {
