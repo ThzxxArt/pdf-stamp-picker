@@ -10,7 +10,7 @@
 
 > ⚠️ 定位说明：这是**签章点坐标选择器**，不是真实盖章渲染器。输出的是签章位置坐标 + 归属用户，**不输出图片**。页面上的公章图只是拖放定位的视觉载体，放置后显示为带用户颜色的占位框。
 
-v4.8 特性：**默认签章模式（点击即放章，章固定大小不越界，定位/框选立即直观反馈）** · **JSON 按用户分组（users[].stamps[]）** · **document.hash（PDF SHA-256 文件指纹）** · **JSON 导入反显（importJSON + 弹窗传 json + 手动输入回显）** · 多签章点 · 多用户动态管理 · 撤销/重做 · 一键弹窗（宽高/模式/校验可配：requireStamp / requireAllUsers）· **工具栏按钮可配置隐藏** · 统一加载（含进度/中止/哈希）· pdf.js 离线资源（cMaps 中文不乱码）· **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
+v4.8 特性：**默认签章模式（点击即放章，章固定大小不越界，定位/框选立即直观反馈）** · **JSON 按用户分组（users[].stamps[]）** · **document.hash（PDF SHA-256 文件指纹）** · **JSON 导入反显 + 可选含图导出（importJSON + toJSON({includeImage}) + 弹窗传 json）** · 多签章点 · 多用户动态管理 · 撤销/重做 · 一键弹窗（宽高/模式/校验/含图可配：requireStamp / requireAllUsers / includeImage）· **工具栏按钮可配置隐藏** · 统一加载（含进度/中止/哈希）· pdf.js 离线资源（cMaps 中文不乱码）· **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
 
 ## 快速开始（真实项目只需一个容器）
 
@@ -406,8 +406,8 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | | `removeStamp(id)` | 删除指定签章点 |
 | | `removeSelection()` | 删除当前选中（无选中则清空临时选区） |
 | | `clear()` / `clearAll()` | 清空全部签章点 |
-| **JSON** | `toJSON()` | **按用户分组**完整 JSON（对接第三方接口） |
-| | `toFlatJSON()` | 扁平版（stamps[] 内嵌 user） |
+| **JSON** | `toJSON({includeImage})` | **按用户分组**完整 JSON；`includeImage:true` 含章图 dataURL（自包含） |
+| | `toFlatJSON({includeImage})` | 扁平版（stamps[] 内嵌 user）；`includeImage:true` 含章图 |
 | | `importJSON(json, opts)` | 从 JSON 反显签章点/公章图（users[] 或 stamps[] 均可） |
 | | `copyJSON()` | 复制 JSON 到剪贴板（内置 toast 反馈） |
 | **撤销** | `undo()` / `redo()` | 撤销/重做签章操作（工具栏按钮 + Ctrl+Z / Ctrl+Shift+Z，上限 50 步） |
