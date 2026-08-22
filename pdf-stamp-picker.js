@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.4';
+  var VERSION = '4.8.5';
 
   /* ====================== 常量 ====================== */
 
@@ -1495,7 +1495,12 @@
    * }
    * 直接对应第三方签章接口的 signers[].signAreas[] 模型。
    */
-  PdfStampPicker.prototype.toJSON = function () {
+  /**
+   * 导出 JSON（按用户分组）。
+   * @param {Object} [opts] { includeImage: true } 包含签章图(dataURL)——数据自包含，后端可直接盖章渲染；默认不含（轻量）
+   */
+  PdfStampPicker.prototype.toJSON = function (opts) {
+    opts = opts || {};
     var doc = {
       docName: this._docName,
       totalPages: this._totalPages,
@@ -1505,13 +1510,15 @@
       rotation: this._rotation,
       offsetX: this._offsetX,
       offsetY: this._offsetY,
-      hash: this._pdfHash || null
+      hash: this._pdfHash || null,
+      includeImage: !!opts.includeImage
     };
     return buildJSON(doc, this._stamps, this._users);
   };
 
   /** 扁平版 JSON（旧结构）：stamps 数组每项内嵌 user，按签章点遍历用 */
-  PdfStampPicker.prototype.toFlatJSON = function () {
+  PdfStampPicker.prototype.toFlatJSON = function (opts) {
+    opts = opts || {};
     return buildFlatJSON({
       docName: this._docName,
       totalPages: this._totalPages,
@@ -1520,7 +1527,8 @@
       height: this._pdfH,
       rotation: this._rotation,
       offsetX: this._offsetX,
-      offsetY: this._offsetY
+      offsetY: this._offsetY,
+      includeImage: !!opts.includeImage
     }, this._stamps, this._users);
   };
 
@@ -3026,7 +3034,7 @@
         var userStamps = stampList
           .filter(function (st) { return st.userId === u.id; })
           .map(function (st) {
-            return {
+            var out = {
               id: st.id,
               page: st.page,
               x: round2(st.x), y: round2(st.y),
@@ -3036,6 +3044,11 @@
               note: st.note || '',
               createdAt: st.createdAt
             };
+            // 可选：包含签章图（dataURL）——数据自包含，后端可直接盖章渲染
+            if (doc.includeImage && st.image && st.image.src) {
+              out.image = { src: st.image.src, name: st.image.name || '', width: st.image.width || 0, height: st.image.height || 0 };
+            }
+            return out;
           });
         return {
           user: { id: u.id, name: u.name, color: u.color || '#4285f4' },
@@ -3063,7 +3076,7 @@
       },
       stamps: (stamps || []).map(function (st) {
         var u = userMap[st.userId] || null;
-        return {
+        var out = {
           id: st.id,
           user: u,
           page: st.page,
@@ -3074,6 +3087,11 @@
           note: st.note || '',
           createdAt: st.createdAt
         };
+        // 可选：包含签章图（dataURL）——数据自包含，后端可直接盖章渲染
+        if (doc.includeImage && st.image && st.image.src) {
+          out.image = { src: st.image.src, name: st.image.name || '', width: st.image.width || 0, height: st.image.height || 0 };
+        }
+        return out;
       })
     };
   }

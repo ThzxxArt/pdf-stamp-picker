@@ -221,7 +221,7 @@ picker.setMode('stamp');
 
 - **每个公司（签署方）的签章点坐标归在自己的 `user` 下**，用户信息在外层只出现一次
 - **`document.hash`**：PDF 文件 SHA-256 哈希（Web Crypto 计算，零依赖）——防篡改/文件指纹，对接验签服务可用；本地文件/字节/流接口加载时计算（静态 URL 原生流式加载时为 null，因无完整字节缓存）
-- 签章点只含坐标，**不含图片信息**（`toJSON()`/`getStamps()` 输出无 image；但 `importJSON()` 支持传入带 `image` 的签章点反显章图，见下节）
+- 签章点默认**不含图片信息**（轻量）；`toJSON({ includeImage: true })` / `toFlatJSON({ includeImage: true })` 可**包含章图 dataURL**（数据自包含，后端直接盖章渲染）；`importJSON()` 支持传入带 `image` 的签章点反显章图，见下节
 - 扁平版 `toFlatJSON()`：`stamps[]` 每项内嵌 `user`，需要按签章点遍历时用
 - 单用户查询：`getStampsByUser(userId)`
 
@@ -231,13 +231,16 @@ picker.setMode('stamp');
 
 ```js
 // 导出 → 存储/传输 → 再导入
-const json = picker.toJSON();
-await saveToServer(json);
+const json = picker.toJSON();                    // 轻量版（不含图）
+const jsonWithImg = picker.toJSON({ includeImage: true });  // 含章图 dataURL（自包含）
+await saveToServer(jsonWithImg);
 
 // 另一处/之后回显
 await picker.load('contract.pdf');
-await picker.importJSON(json);
+await picker.importJSON(jsonWithImg);
 ```
+
+> **`includeImage: true` 的用途**：数据自包含——后端拿到 JSON 即可用 `image.src`（dataURL）直接渲染盖章，无需另行同步章图库。代价是 JSON 体积增大（每张章图几 KB~几十 KB）。日常轻量传输用默认不含图即可，`importJSON()` 两种都支持。
 
 - **恢复签署方列表**（id/name/color 自动同步，缺失的自动添加）
 - **恢复签章点**：坐标/尺寸/页码/备注全部回显，可继续拖动/编辑/删除

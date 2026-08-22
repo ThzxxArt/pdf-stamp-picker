@@ -96,6 +96,8 @@ export interface StampJSON {
   rotation: number;
   note: string;
   createdAt: string;
+  /** 章图（仅 toJSON({includeImage:true}) 时输出） */
+  image?: { src: string; name: string; width: number; height: number };
 }
 
 /** 按用户分组：每个签署方（user）下挂自己的签章点坐标 */
@@ -204,9 +206,9 @@ export default class PdfStampPicker {
   clearAll(): this;
   removeSelection(): this;
 
-  /** JSON 导出：toJSON() 按用户分组 / toFlatJSON() 扁平 / copyJSON() 复制 */
-  toJSON(): PickerJSON;
-  toFlatJSON(): FlatPickerJSON;
+  /** JSON 导出：toJSON() 按用户分组 / toFlatJSON() 扁平；opts.includeImage=true 含章图 dataURL（自包含） */
+  toJSON(opts?: { includeImage?: boolean }): PickerJSON;
+  toFlatJSON(opts?: { includeImage?: boolean }): FlatPickerJSON;
   /** 从 JSON 反显签章点与公章图（users[] 或 stamps[] 结构均可） */
   importJSON(json: PickerJSON | FlatPickerJSON, opts?: { replace?: boolean }): Promise<void>;
   copyJSON(): Promise<PickerJSON>;

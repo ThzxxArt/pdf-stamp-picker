@@ -3,7 +3,7 @@ const assert = require('assert');
 const PdfStampPickerModule = require('/var/minis/workspace/pdf-stamp-picker/pdf-stamp-picker.js');
 const { _internals, version } = PdfStampPickerModule;
 
-assert.strictEqual(version, '4.8.4');
+assert.strictEqual(version, '4.8.5');
 
 const { buildJSON, buildFlatJSON, genId, normalizeRotation } = _internals;
 
@@ -175,3 +175,12 @@ assert.strictEqual(p3.stamps[0].userId, 'u1');
 assert.strictEqual(p3.stamps[1].userId, 'u2', '甲乙签章点 userId 应各自保持');
 
 console.log('=== v4 单测全部通过（.../导入解析/哈希/按用户章图） ===');
+
+// --- v4.8.5: toJSON includeImage 可选 ---
+const withImgStamp = { id: 'i1', userId: 'u1', page: 1, x: 1, y: 2, width: 3, height: 4, rotation: 0, note: '', createdAt: '', image: { src: 'data:image/png;base64,AAA', name: '章.png', width: 100, height: 100 } };
+const noImgOut = buildJSON({ docName: 'a', totalPages: 1, currentPage: 1, width: 1, height: 1, rotation: 0, offsetX: 0, offsetY: 0, includeImage: false }, [withImgStamp], users);
+assert.strictEqual('image' in noImgOut.users[0].stamps[0], false, 'includeImage:false 不含图');
+const withImgOut = buildJSON({ docName: 'a', totalPages: 1, currentPage: 1, width: 1, height: 1, rotation: 0, offsetX: 0, offsetY: 0, includeImage: true }, [withImgStamp], users);
+assert.deepStrictEqual(withImgOut.users[0].stamps[0].image, { src: 'data:image/png;base64,AAA', name: '章.png', width: 100, height: 100 }, 'includeImage:true 含图');
+
+console.log('=== v4 单测全部通过（.../按用户章图/含图导出） ===');
