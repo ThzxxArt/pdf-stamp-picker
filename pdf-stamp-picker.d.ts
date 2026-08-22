@@ -149,6 +149,8 @@ export interface OpenModalConfig extends Partial<PdfStampPickerOptions> {
   requireStamp?: boolean;
   /** 每个签署方至少一个签章点才允许确认（优先于 requireStamp） */
   requireAllUsers?: boolean;
+  /** 确认返回的 JSON 是否包含签章图 dataURL（数据自包含，后端直接盖章；默认不含） */
+  includeImage?: boolean;
   onConfirm?: (json: PickerJSON) => void | Promise<void>;
   onCancel?: () => void;
   /** 透传给选择器的选项 */

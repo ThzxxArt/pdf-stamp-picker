@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.5';
+  var VERSION = '4.8.6';
 
   /* ====================== 常量 ====================== */
 
@@ -2753,6 +2753,7 @@
    * @param {boolean} [config.closeOnBackdrop=true] 点遮罩关闭
    * @param {boolean} [config.requireStamp=false] 无签章点不允许确认
    * @param {boolean} [config.requireAllUsers=false] 每个签署方至少一个签章点才允许确认（优先于 requireStamp）
+   * @param {boolean} [config.includeImage=false] 确认返回的 JSON 是否包含签章图 dataURL（数据自包含，后端直接盖章；默认不含轻量）
    * @param {Function} [config.onConfirm] 确认回调（可返回 Promise 阻止关闭）
    * @param {Function} [config.onCancel]
    * @param {Object} [config.pickerOptions] 透传给选择器的其他选项
@@ -2841,7 +2842,7 @@
       }
       function doConfirm() {
         if (settled) return;
-        var json = picker.toJSON();
+        var json = picker.toJSON({ includeImage: config.includeImage });   // 可选含章图（自包含）
         var stampTotal = (json.users || []).reduce(function (n, g) {
           return n + (g.stamps ? g.stamps.length : 0);
         }, 0);
