@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html ng-app="pspDemo">
+<head>
+<meta charset="UTF-8">
+<title>AngularJS 集成冒烟测试</title>
+<script src="../vendor/angular.min.js"></script>
+<script src="../vendor/pdf.min.js"></script>
+<script src="../pdf-stamp-picker.js"></script>
+<style>body{font-family:sans-serif;background:#f0f2f5;padding:16px;margin:0}#stage{width:100%;height:520px;background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.12);overflow:hidden}#log{font:12px monospace;margin-top:12px;white-space:pre-wrap;color:#1a73e8}</style>
+</head>
+<body ng-controller="DemoCtrl">
+<h3>AngularJS 1.8 集成测试（指令模式 + 弹窗模式）</h3>
+<div pdf-stamp-picker signers="signers" style="width:100%;height:520px;display:block"></div>
+<div style="margin-top:10px">
+  <button ng-click="confirm()">确认签章($scope)</button>
+  <button ng-click="openModal()">弹窗模式</button>
+</div>
+<pre id="log">等待…</pre>
+
+<script>
+angular.module('pspDemo', []).directive('pdfStampPicker', function () {
+  return {
+    restrict: 'A',
+    scope: { onReady: '&', signers: '=' },
+    link: function (scope, element) {
+      var picker = new PdfStampPicker(element[0], {
+        users: scope.signers || [],
+        mode: 'stamp'
+      });
+      // 把实例挂到 $rootScope（指令与控制器都能访问，可靠无时序坑）
+      scope.$root.picker = picker;
+      // 用流接口方式加载(带自定义头 → 算哈希)
+      picker.load({ url: 'test.pdf', headers: { 'X-Angular': '1' } });
+      scope.$on('$destroy', function () { picker.destroy(); });
+    }
+  };
+}).controller('DemoCtrl', ['$scope', '$timeout', function ($scope, $timeout) {
+  $scope.signers = [
+    { id: 'a1', name: '甲方', color: '#4285f4' },
+    { id: 'b1', name: '乙方', color: '#ea4335' }
+  ];
+  $scope.onReady = function (args) {
+    $scope.picker = args.picker;
+  };
+  $scope.confirm = function () {
+    var json = $scope.picker ? $scope.picker.toJSON() : ($scope.$root.picker ? $scope.$root.picker.toJSON() : null);
+    $timeout(function () {
+      document.getElementById('log').textContent =
+        '指令模式确认: ' + (json ? 'users=' + json.users.length + ' doc.hash=' + (json.document.hash || 'null').slice(0, 12) : 'picker 未就绪');
+    });
+  };
+  $scope.openModal = function () {
+    PdfStampPicker.openModal({
+      source: { url: 'test.pdf', headers: { 'X-M': '1' } },
+      users: $scope.signers,
+      title: 'AngularJS 弹窗',
+      confirmText: '确认签章点',
+      requireAllUsers: true,
+      width: 800, height: 600
+    }).then(function (json) {
+      $timeout(function () {
+        document.getElementById('log').textContent =
+          '弹窗模式: ' + (json ? '确认返回 ' + json.users.length + ' 组' : '取消返回 null');
+      });
+    });
+  };
+}]);
+</script>
+</body>
+</html>
