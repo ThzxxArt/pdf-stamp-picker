@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.10';
+  var VERSION = '4.8.11';
 
   /* ====================== 常量 ====================== */
 
@@ -887,8 +887,8 @@
   PdfStampPicker.prototype._setupCompatWorker = function (pdfjs, workerFileUrl) {
     try {
       if (!workerFileUrl || isAtSupported()) return;
-      // polyfill 源码（注入 worker 内）
-      var polyfillCode = 'if(!Array.prototype.at){Array.prototype.at=function(n){n=Number(n);var l=this.length;if(n<0)n=Math.max(l+n,0);return n>=0&&n<l?this[n]:void 0;}};'
+      // polyfill 源码（注入 worker 内；用 defineProperty 不可枚举，避免 pdf.js 的 for...in 防御检查报错）
+      var polyfillCode = 'if(!Array.prototype.at){Object.defineProperty(Array.prototype,"at",{value:function(n){n=Number(n);var l=this.length;if(n<0)n=Math.max(l+n,0);return n>=0&&n<l?this[n]:void 0;},writable:true,configurable:true,enumerable:false});}'
         + 'if(typeof structuredClone==="undefined"){self.structuredClone=function(o){try{return JSON.parse(JSON.stringify(o))}catch(e){return o}};};';
       // data: URL worker：先跑 polyfill，再 importScripts 真实 worker
       var workerCode = polyfillCode + 'importScripts("' + workerFileUrl + '");';
@@ -2983,12 +2983,19 @@
   /** 兼容旧浏览器：pdf.js 3.11 依赖 Array.prototype.at()，旧内核(Chrome<92/Edge<92/Safari<15.4)不支持 */
   function ensureAtPolyfill() {
     if (typeof Array !== 'undefined' && !Array.prototype.at) {
-      Array.prototype.at = function (index) {
-        var n = Number(index);
-        var len = this.length;
-        if (n < 0) n = Math.max(len + n, 0);
-        return n >= 0 && n < len ? this[n] : undefined;
-      };
+      // 必须用 defineProperty 定义成【不可枚举】——pdf.js 会检测 Array.prototype 上多余的可枚举属性
+      // （可枚举会破坏 for...in 迭代，pdf.js 直接报错拒绝加载）
+      Object.defineProperty(Array.prototype, 'at', {
+        value: function (index) {
+          var n = Number(index);
+          var len = this.length;
+          if (n < 0) n = Math.max(len + n, 0);
+          return n >= 0 && n < len ? this[n] : undefined;
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false   // ★ 关键：不可枚举
+      });
     }
   }
 
