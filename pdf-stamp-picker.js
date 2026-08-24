@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.7';
+  var VERSION = '4.8.8';
 
   /* ====================== 常量 ====================== */
 
@@ -334,6 +334,8 @@
     this._destroyed = false;
     this._stampImg = null;   // {src, name, w, h, el(Image)}
 
+    // 兼容旧浏览器：pdf.js 3.11 依赖 Array.prototype.at()，先注入 polyfill
+    ensureAtPolyfill();
     injectStyles();
     this._buildDOM();
     this._bindEvents();
@@ -826,6 +828,8 @@
     var pdfjs = this._options.pdfjs || (typeof window !== 'undefined' && window.pdfjsLib) || null;
     if (pdfjs) {
       if (typeof window !== 'undefined' && !window.pdfjsLib) window.pdfjsLib = pdfjs;
+      // 旧浏览器不支持 .at() → 强制 fake worker（主线程模拟，polyfill 生效）
+      if (!isAtSupported()) this._forceFakeWorker(pdfjs);
       return Promise.resolve(pdfjs);
     }
     if (this._pdfjsPromise) return this._pdfjsPromise;
@@ -834,9 +838,23 @@
       : PdfStampPicker.loadPdfJsAuto()                      // 本地探测 → CDN 兜底
     ).then(function (lib) {
       self._options.pdfjs = lib;
+      // 旧浏览器不支持 .at() → fake worker（主线程跑 worker 逻辑，polyfill 生效）
+      if (!isAtSupported()) self._forceFakeWorker(lib);
       return lib;
     });
     return this._pdfjsPromise;
+  };
+
+  /** 强制 pdf.js 使用 fake worker（主线程模拟）——旧浏览器 worker 内无法注入 polyfill 时用 */
+  PdfStampPicker.prototype._forceFakeWorker = function (pdfjs) {
+    try {
+      // pdf.js 3.x：workerSrc 为空时自动回退 fake worker（主线程加载 worker 逻辑）
+      pdfjs.GlobalWorkerOptions.workerSrc = '';
+      // 若已创建 worker 则销毁，下次 getDocument 用 fake worker
+      if (pdfjs.PDFWorker && pdfjs.PDFWorker._workerPorts) {
+        pdfjs.PDFWorker._workerPorts.clear && pdfjs.PDFWorker._workerPorts.clear();
+      }
+    } catch (e) { /* ignore */ }
   };
 
   /**
@@ -2912,6 +2930,24 @@
       }
       return hex;
     }).catch(function () { return null; });
+  }
+
+  /** 兼容旧浏览器：pdf.js 3.11 依赖 Array.prototype.at()，旧内核(Chrome<92/Edge<92/Safari<15.4)不支持 */
+  function ensureAtPolyfill() {
+    if (typeof Array !== 'undefined' && !Array.prototype.at) {
+      Array.prototype.at = function (index) {
+        var n = Number(index);
+        var len = this.length;
+        if (n < 0) n = Math.max(len + n, 0);
+        return n >= 0 && n < len ? this[n] : undefined;
+      };
+    }
+  }
+
+  /** 检测浏览器是否支持 Array.prototype.at（pdf.js 3.11 必需） */
+  function isAtSupported() {
+    try { return typeof Array.prototype.at === 'function' && [1].at(0) === 1; }
+    catch (e) { return false; }
   }
 
   function hexToRgba(hex, alpha) {
