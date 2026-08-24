@@ -80,10 +80,9 @@
   </aside>
 </main>
 
-<script src="../vendor/pdf.min.js"></script>
 <script src="../pdf-stamp-picker.js?v=4.8.21"></script>
 <script>
-pdfjsLib.GlobalWorkerOptions.workerSrc = '../vendor/pdf.worker.min.js';
+// pdf.js 由库自动探测加载（与真实项目一致：库自动找同目录 vendor/pdf.min.js）
 
 const stage = document.getElementById('stage');
 const output = document.getElementById('output');

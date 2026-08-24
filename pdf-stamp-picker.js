@@ -45,6 +45,15 @@
 
   var VERSION = '4.8.21';
 
+  // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
+  // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
+  (function () {
+    try {
+      var cur = document.currentScript;
+      if (cur && cur.src) window.__pspLibSrc = cur.src;
+    } catch (e) { /* ignore */ }
+  })();
+
   /* ====================== 常量 ====================== */
 
   var DEFAULT_DPI = 96;
@@ -304,8 +313,9 @@
     }, options || {});
     if (options && options.pdfjs) this._options.pdfjs = options.pdfjs;
 
-    // ★ 记录库脚本自身位置（同步执行时 currentScript 有效；异步 load 时探测用）
-    this._libSrc = (document.currentScript && document.currentScript.src) || null;
+    // ★ 记录库脚本自身位置（优先用库加载时捕获的全局；构造时 currentScript 可能指向宿主脚本）
+    this._libSrc = (typeof window !== 'undefined' && window.__pspLibSrc) ||
+      (document.currentScript && document.currentScript.src) || null;
 
     // 用户与颜色
     this._users = (this._options.users && this._options.users.length)
