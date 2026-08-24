@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.22';
+  var VERSION = '4.8.23';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -820,7 +820,8 @@
     var cMapUrl = this._options.cMapUrl;
     if (cMapUrl === undefined && this._detectedCMapUrl === undefined) {
       // 首次加载：先探测本地 cMaps/（同步串接，不阻塞主流程太久）
-      var scriptSrc = (document.currentScript && document.currentScript.src) || null;
+      // ★ 用库位置（_libSrc）作探测基址，与 pdf.min.js 探测一致（异步时 currentScript 失效）
+      var scriptSrc = this._libSrc || (document.currentScript && document.currentScript.src) || null;
       var cands = PdfStampPicker._localCandidates(window.location.href, scriptSrc);
       var cMapCands = [];
       cands.forEach(function (c) {
@@ -1035,28 +1036,58 @@
     // scriptSrc 由调用方传入（实例构造时记录的库位置）；异步调用时 currentScript 已失效
     if (!scriptSrc) scriptSrc = (document.currentScript && document.currentScript.src) || null;
     var candidates = PdfStampPicker._localCandidates(window.location.href, scriptSrc);
+
+    // 加载方式一：script 标签（跨域无需 CORS，但受浏览器 MIME 严格检查 / script-src CSP 限制）
+    var loadViaScript = function (src) {
+      return new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.onload = function () { resolve(); };
+        s.onerror = function () { reject(new Error('script fail: ' + src)); };
+        document.head.appendChild(s);
+      });
+    };
+
+    // 加载方式二：fetch 源码 → Blob 执行（绕开 MIME 严格检查；内网 cmaps 已证明 fetch 通路可用）
+    var loadViaFetchBlob = function (src) {
+      return fetch(src).then(function (res) {
+        if (!res.ok) throw new Error('fetch fail: ' + src + ' status=' + res.status);
+        return res.text();
+      }).then(function (code) {
+        return new Promise(function (resolve, reject) {
+          var blob = new Blob([code], { type: 'application/javascript' });
+          var url = URL.createObjectURL(blob);
+          var s = document.createElement('script');
+          s.src = url;
+          s.onload = function () { URL.revokeObjectURL(url); resolve(); };
+          s.onerror = function () { URL.revokeObjectURL(url); reject(new Error('blob script fail: ' + src)); };
+          document.head.appendChild(s);
+        });
+      });
+    };
+
+    // 单个候选加载成功后的统一收尾（推断 worker 路径）
+    var onLoaded = function (src) {
+      if (!window.pdfjsLib) throw new Error('no pdfjsLib: ' + src);
+      var cleanSrc = String(src).split('?')[0].split('#')[0];
+      var workerSrc = cleanSrc.replace(/pdf(\.min)?\.js$/, 'pdf.worker$1.js');
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.pdfjsLib.GlobalWorkerOptions.workerSrc || workerSrc;
+      return window.pdfjsLib;
+    };
+
     var idx = 0;
     var tryNext = function () {
       if (idx >= candidates.length) {
         return PdfStampPicker.loadPdfJs(); // CDN 兜底
       }
       var src = candidates[idx++];
-      return new Promise(function (resolve, reject) {
-        var s = document.createElement('script');
-        s.src = src;
-        s.onload = function () {
-          if (window.pdfjsLib) {
-            var cleanSrc = String(src).split('?')[0].split('#')[0];
-            var workerSrc = cleanSrc.replace(/pdf(\.min)?\.js$/, 'pdf.worker$1.js');
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.pdfjsLib.GlobalWorkerOptions.workerSrc || workerSrc;
-            resolve(window.pdfjsLib);
-          } else {
-            reject(new Error('no pdfjsLib: ' + src));
-          }
-        };
-        s.onerror = function () { reject(new Error('load fail: ' + src)); };
-        document.head.appendChild(s);
-      }).catch(tryNext);
+      // script 标签失败（MIME/CSP）→ 同 URL fetch + Blob 兜底 → 再失败才换候选
+      return loadViaScript(src)
+        .then(function () { return onLoaded(src); })
+        .catch(function () {
+          return loadViaFetchBlob(src).then(function () { return onLoaded(src); });
+        })
+        .catch(tryNext);
     };
     return tryNext();
   };
