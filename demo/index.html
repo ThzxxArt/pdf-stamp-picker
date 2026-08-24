@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PdfStampPicker v4.8.13 — 电子签章坐标选择器 Demo</title>
+<title>PdfStampPicker v4.8.14 — 电子签章坐标选择器 Demo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif; background: #f0f2f5; color: #202124; height: 100vh; display: flex; flex-direction: column; }
@@ -30,7 +30,7 @@
   .add-signer { display: flex; gap: 6px; padding: 0 16px 8px; }
   .add-signer input { flex: 1; background: #f8f9fa; border: 1px solid #e3e6ea; border-radius: 8px; padding: 6px 10px; font-size: 11.5px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; min-width: 0; }
   .add-signer input:focus { border-color: #4285f4; box-shadow: 0 0 0 3px rgba(66,133,244,.12); }
-  .add-signer button { background: #34.8.13; color: #fff; border: none; border-radius: 8px; padding: 6px 14px; font-size: 11.5px; cursor: pointer; font-weight: 600; transition: background .15s ease; }
+  .add-signer button { background: #34.8.14; color: #fff; border: none; border-radius: 8px; padding: 6px 14px; font-size: 11.5px; cursor: pointer; font-weight: 600; transition: background .15s ease; }
   .add-signer button:hover { background: #2d9249; }
   .ops { display: flex; gap: 8px; padding: 2px 16px 12px; flex-wrap: wrap; }
   .ops button { background: #f8f9fa; border: 1px solid #e3e6ea; color: #3c4043; border-radius: 8px; padding: 6px 14px; font-size: 11.5px; cursor: pointer; transition: all .15s ease; display: inline-flex; align-items: center; gap: 5px; }
@@ -49,7 +49,7 @@
 <body>
 <header>
   <div class="logo">🖊</div>
-  <h1>PdfStampPicker <span class="tag">单文件 · 零依赖 · 坐标选择器</span><span class="ver" id="ver-tag">v4.8.13</span></h1>
+  <h1>PdfStampPicker <span class="tag">单文件 · 零依赖 · 坐标选择器</span><span class="ver" id="ver-tag">v4.8.14</span></h1>
   <nav class="tabs">
     <button id="tab-container" class="active">容器模式</button>
     <button id="tab-canvas">纯画布</button>
@@ -81,7 +81,7 @@
 </main>
 
 <script src="../vendor/pdf.min.js"></script>
-<script src="../pdf-stamp-picker.js?v=4.8.13"></script>
+<script src="../pdf-stamp-picker.js?v=4.8.14"></script>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = '../vendor/pdf.worker.min.js';
 
@@ -107,7 +107,7 @@ document.head.appendChild(styleEl);
 const USERS = [
   { id: 'u1', name: '甲方', color: '#4285f4' },
   { id: 'u2', name: '乙方', color: '#ea4335' },
-  { id: 'u3', name: '丙方', color: '#34.8.13' }
+  { id: 'u3', name: '丙方', color: '#34.8.14' }
 ];
 
 function renderJSON() {

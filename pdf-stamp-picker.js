@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.13';
+  var VERSION = '4.8.14';
 
   /* ====================== 常量 ====================== */
 
@@ -881,25 +881,32 @@
   };
 
   /**
-   * 旧浏览器（不支持 Array.at/structuredClone）的终极兜底：
-   * 用 data: URL 内联 worker，把 polyfill 注入 worker 源码再 importScripts 真实 worker 文件。
-   * 这样即使 worker 是独立线程，polyfill 也在其中生效。
+   * 旧浏览器（Edge90 等，不支持 Array.at/structuredClone）的 worker 方案：
+   * 用 <script> 把 worker 文件加载到主线程全局（此时主线程 polyfill 已就位，全局有 WorkerMessageHandler），
+   * 再把 workerSrc 设为无效 URL 让 pdf.js 创建 Worker 失败 → 回退 fake worker（主线程跑 worker 逻辑）。
    */
   PdfStampPicker.prototype._setupCompatWorker = function (pdfjs, workerFileUrl) {
     try {
       if (!workerFileUrl || isAtSupported()) return;
-      // polyfill 源码（注入 worker 内；用 defineProperty 不可枚举，避免 pdf.js 的 for...in 防御检查报错）
-      var polyfillCode = 'if(!Array.prototype.at){Object.defineProperty(Array.prototype,"at",{value:function(n){n=Number(n);var l=this.length;if(n<0)n=Math.max(l+n,0);return n>=0&&n<l?this[n]:void 0;},writable:true,configurable:true,enumerable:false});}'
-        + 'if(typeof structuredClone==="undefined"){self.structuredClone=function(o){try{return JSON.parse(JSON.stringify(o))}catch(e){return o}};};';
-      // data: URL worker：先跑 polyfill，再 importScripts 真实 worker（URL 需绝对路径，importScripts 不支持相对）
-      var absWorkerUrl = new URL(workerFileUrl, window.location.href).href;
-      var workerCode = polyfillCode + 'importScripts("' + absWorkerUrl + '");';
-      var blob = new Blob([workerCode], { type: 'application/javascript' });
-      var workerUrl = URL.createObjectURL(blob);
-      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-      // 记录以便后续 revoke（避免泄漏）
-      this._compatWorkerUrl = workerUrl;
-    } catch (e) { /* ignore：失败则走 fake worker */ }
+      var self = this;
+      // 主线程 polyfill 再确保（构造时已注入，此处保险）
+      ensureAtPolyfill();
+      ensureStructuredClonePolyfill();
+      // 用 script 加载 worker 文件到全局（WorkerMessageHandler 挂到 globalThis）
+      if (!self._compatWorkerScript) {
+        var s = document.createElement('script');
+        var absUrl = new URL(workerFileUrl, window.location.href).href;
+        s.src = absUrl;
+        s.onload = function () { self._compatWorkerScript = true; };
+        s.onerror = function () { /* 失败则 fake worker 也失败，靠 pdf.js 报错 */ };
+        document.head.appendChild(s);
+      }
+      // 让 pdf.js 创建真实 Worker 失败 → 回退 fake worker（主线程已有 WorkerMessageHandler）
+      pdfjs.GlobalWorkerOptions.workerSrc = 'data:text/javascript;charset=utf-8,' + encodeURIComponent('throw new Error("compat");');
+      if (pdfjs.PDFWorker && pdfjs.PDFWorker._workerPorts) {
+        pdfjs.PDFWorker._workerPorts.clear && pdfjs.PDFWorker._workerPorts.clear();
+      }
+    } catch (e) { /* ignore */ }
   };
 
   /**
