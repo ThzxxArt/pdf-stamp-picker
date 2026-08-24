@@ -547,6 +547,7 @@ await picker.load(file)
 ## 12. 版本与兼容
 
 - 浏览器：Chrome/Edge/Firefox/Safari 近两个大版本（Pointer Events + ResizeObserver，无 RO 自动回退）
+- **旧浏览器（Edge 90 / Chrome 90 及更旧）**：pdf.js 3.11 依赖 `Array.prototype.at()`（92+）和 `structuredClone`（98+），库自动注入 polyfill + **兼容 worker**（data:URL 内联注入 polyfill），worker 线程同样生效；不支持时回退 fake worker。**v4.8.8+ 起支持**
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 - 坐标：PDF 原生 pt、原点左下、自动补偿页面旋转——对接任何签章服务前先对齐坐标约定（README 有换算公式）
-- 当前版本 v4.6.x：默认签章模式 · JSON 分组输出/导入反显（`importJSON` / 弹窗传 `json`）· 撤销重做 · 多签署方动态管理 · 章固定大小 · 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线
+- 当前版本 v4.8.x：默认签章模式 · JSON 分组输出/含图导出（`includeImage`）/导入反显（`importJSON` / 弹窗传 `json`）· `document.hash`（SHA-256 文件指纹）· 撤销重做 · 多签署方动态管理 · 章固定大小 · 工具栏按钮可配置（`toolbar`）· 弹窗校验（`requireStamp` / `requireAllUsers`）· 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线 · Edge 90+ 兼容
