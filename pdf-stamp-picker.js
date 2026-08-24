@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.21';
+  var VERSION = '4.8.22';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -357,6 +357,7 @@
     // 兼容旧浏览器：pdf.js 3.11 依赖 Array.prototype.at() / structuredClone，先注入 polyfill
     ensureAtPolyfill();
     ensureStructuredClonePolyfill();
+    ensureReplaceAllPolyfill();
     injectStyles();
     this._buildDOM();
     this._bindEvents();
@@ -928,6 +929,7 @@
       // 主线程 polyfill 再确保（构造时已注入，此处保险）
       ensureAtPolyfill();
       ensureStructuredClonePolyfill();
+      ensureReplaceAllPolyfill();
       var absUrl = new URL(workerFileUrl, window.location.href).href;
       // fetch worker 源码，头部注入 polyfill
       return fetch(absUrl).then(function (res) {
@@ -936,7 +938,8 @@
       }).then(function (src) {
         var polyfillCode =
           'if(!Array.prototype.at){Object.defineProperty(Array.prototype,"at",{value:function(n){n=Number(n);var l=this.length;if(n<0)n=Math.max(l+n,0);return n>=0&&n<l?this[n]:void 0;},writable:true,configurable:true,enumerable:false});}' +
-          'if(typeof structuredClone==="undefined"){self.structuredClone=function(o){try{return JSON.parse(JSON.stringify(o))}catch(e){return o}};};';
+          'if(typeof structuredClone==="undefined"){self.structuredClone=function(o){try{return JSON.parse(JSON.stringify(o))}catch(e){return o}};};' +
+          'if(typeof String.prototype.replaceAll==="undefined"){Object.defineProperty(String.prototype,"replaceAll",{value:function(search,replace){var self=this;if(search instanceof RegExp){if(!search.global)throw new TypeError("replaceAll must be called with a global RegExp");return self.replace(search,replace);}return self.split(search).join(replace);},writable:true,configurable:true,enumerable:false});};';
         // 头部注释保留（license），polyfill 插在首个可执行代码前
         var injected = src;
         var commentEnd = injected.indexOf('!function');
@@ -3147,6 +3150,22 @@
         // 降级：JSON 序列化（适用于可序列化对象；pdf.js 用于 ImageBitmap 等场景的降级）
         return JSON.parse(JSON.stringify(obj));
       };
+    }
+  }
+
+  /** 主线程 replaceAll polyfill（Edge 90 缺，pdf.js 字符串处理用） */
+  function ensureReplaceAllPolyfill() {
+    if (typeof String !== 'undefined' && typeof String.prototype.replaceAll === 'undefined') {
+      Object.defineProperty(String.prototype, 'replaceAll', {
+        value: function (search, replace) {
+          if (search instanceof RegExp) {
+            if (!search.global) throw new TypeError('replaceAll must be called with a global RegExp');
+            return this.replace(search, replace);
+          }
+          return this.split(search).join(replace);
+        },
+        writable: true, configurable: true, enumerable: false
+      });
     }
   }
 

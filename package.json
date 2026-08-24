@@ -1,6 +1,6 @@
 {
   "name": "pdf-stamp-picker",
-  "version": "4.8.21",
+  "version": "4.8.22",
   "description": "纯JS PDF电子签章坐标选择器 - 单文件零依赖, 默认签章模式点击放章, JSON按签署方分组+导入反显, 直接对接第三方签章接口",
   "type": "commonjs",
   "main": "pdf-stamp-picker.js",
