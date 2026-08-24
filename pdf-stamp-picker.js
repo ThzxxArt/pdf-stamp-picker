@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.15';
+  var VERSION = '4.8.16';
 
   /* ====================== 常量 ====================== */
 
@@ -637,10 +637,13 @@
     opts = opts || {};
     var p;
 
-    // 旧浏览器检测（Edge 90 等）：不支持 pdf.js 3.11 所需 API → 友好提示升级，而非晦涩报错
-    if (this._options.compatCheck !== false && !isAtSupported()) {
-      this._showCompatWarning();
-      return Promise.reject(new Error('当前浏览器版本过旧，无法加载 PDF。请升级到 Chrome/Edge 92+、Firefox 94+ 或 Safari 15.4+。'));
+    // 浏览器兼容检测：pdf.js 3.11 需要多项现代 API，不满足（如 Chrome<98/Edge<98/FF<94/Safari<15.4）→ 友好提示升级
+    if (this._options.compatCheck !== false) {
+      var compat = isCompatSupported();
+      if (!compat.ok) {
+        this._showCompatWarning(compat.missing);
+        return Promise.reject(new Error('当前浏览器版本过旧，无法加载 PDF。缺少：' + compat.missing.join('、') + '。请升级到 Chrome/Edge 98+、Firefox 94+ 或 Safari 15.4+。'));
+      }
     }
 
     // 中止上一次未完成的加载（切换文档时）
@@ -1730,16 +1733,19 @@
 
   /** 轻提示（内置，单例复用防 DOM 堆积） */
   /** 旧浏览器升级提示（内联样式，零依赖） */
-  PdfStampPicker.prototype._showCompatWarning = function () {
+  PdfStampPicker.prototype._showCompatWarning = function (missing) {
     if (typeof document === 'undefined') return;
     if (document.querySelector('.psp-compat-warn')) return;
     var el = document.createElement('div');
     el.className = 'psp-compat-warn';
-    el.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;color:#202124;border-radius:14px;padding:28px 32px;max-width:420px;box-shadow:0 12px 48px rgba(0,0,0,.35);z-index:100001;text-align:center;font-family:system-ui,sans-serif';
+    el.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;color:#202124;border-radius:14px;padding:28px 32px;max-width:440px;box-shadow:0 12px 48px rgba(0,0,0,.35);z-index:100001;text-align:center;font-family:system-ui,sans-serif';
+    var missingHtml = (missing && missing.length)
+      ? '<div style="font-size:11.5px;color:#9aa0a6;margin-bottom:12px">缺少能力：' + missing.join('、') + '</div>'
+      : '';
     el.innerHTML =
       '<div style="font-size:38px;margin-bottom:12px">⚠️</div>' +
       '<div style="font-size:16px;font-weight:600;margin-bottom:8px">浏览器版本过旧，无法加载 PDF</div>' +
-      '<div style="font-size:12.5px;color:#5f6368;line-height:1.7;margin-bottom:16px">当前浏览器不支持 PDF 签章所需的现代特性。<br>请升级到：<br><b>Chrome / Edge 92+</b> 或 <b>Firefox 94+</b> 或 <b>Safari 15.4+</b></div>' +
+      '<div style="font-size:12.5px;color:#5f6368;line-height:1.7;margin-bottom:16px">当前浏览器不支持 PDF 签章所需的现代特性。<br>请升级到：<br><b>Chrome / Edge 98+</b> 或 <b>Firefox 94+</b> 或 <b>Safari 15.4+</b></div>' + missingHtml +
       '<a href="https://www.google.com/chrome/" target="_blank" rel="noopener" style="display:inline-block;background:#1a73e8;color:#fff;border-radius:8px;padding:9px 24px;font-size:13px;font-weight:600;text-decoration:none">前往升级浏览器</a>';
     document.body.appendChild(el);
   };
@@ -3030,7 +3036,28 @@
     }
   }
 
-  /** 检测浏览器是否支持 Array.prototype.at（pdf.js 3.11 必需） */
+  /**
+   * 全面浏览器兼容检测（pdf.js 3.11 + 库所需全部现代 API）。
+   * 返回 { ok, missing[] } —— missing 列出缺的能力，便于提示。
+   */
+  function isCompatSupported() {
+    var missing = [];
+    try {
+      if (typeof Array.prototype.at !== 'function' || [1].at(0) !== 1) missing.push('Array.at');
+      if (typeof structuredClone !== 'function') missing.push('structuredClone');
+      // 可选链 ?. / 空值合并 ??（pdf.js 3.11 语法级依赖，低版本浏览器直接 SyntaxError）
+      try { eval('var __t = {}?.a ?? 1;'); } catch (e) { missing.push('optional chaining/??'); }
+      if (typeof Promise.any !== 'function') missing.push('Promise.any');
+      if (typeof String.prototype.replaceAll !== 'function') missing.push('String.replaceAll');
+      if (typeof Array.prototype.flat !== 'function') missing.push('Array.flat');
+      if (typeof globalThis === 'undefined') missing.push('globalThis');
+    } catch (e) {
+      missing.push('compat-check-error');
+    }
+    return { ok: missing.length === 0, missing: missing };
+  }
+
+  /** 兼容旧写法：只查 Array.at（历史方法保留） */
   function isAtSupported() {
     try { return typeof Array.prototype.at === 'function' && [1].at(0) === 1; }
     catch (e) { return false; }
