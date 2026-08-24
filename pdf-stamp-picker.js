@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.17';
+  var VERSION = '4.8.18';
 
   /* ====================== 常量 ====================== */
 
@@ -654,6 +654,10 @@
     // 释放旧文档（防内存累积）
     if (this._pdf && this._pdf.destroy) { try { this._pdf.destroy(); } catch (e) { /* ignore */ } }
     this._pdf = null;
+    // 清旧文档页面状态（防加载失败后 _pageInfo 输出旧数据）
+    this._page = null;
+    this._pageNumber = 1;
+    this._pdfW = 0; this._pdfH = 0;
 
     if (isPdfjsProxy(source)) {
       p = Promise.resolve(source);
@@ -752,7 +756,7 @@
       var total = parseInt(res.headers.get('Content-Length') || '0', 10) || 0;
       var reader = res.body && res.body.getReader ? res.body.getReader() : null;
       // 旧浏览器（不支持 Array.at，如 Edge 90）的 fetch 流式读取有已知 bug，可能读成空 body → 直接一次性 arrayBuffer
-      if (!reader || !isAtSupported()) return res.arrayBuffer();
+      if (!reader || !isCompatSupported().ok) return res.arrayBuffer();
       var chunks = [];
       var received = 0;
       var pump = function () {
@@ -1038,6 +1042,10 @@
     this._stamps = [];
     this._activeId = null;
     this._sel = null;
+    // 纯画布模式无 PDF 字节 → 清哈希缓存（防 toJSON 输出旧 load 的哈希）
+    this._pdfBytes = null;
+    this._pdfHash = null;
+    this._pdfHashPromise = null;
 
     var old = this._canvas;
     var cv = meta.canvas;
