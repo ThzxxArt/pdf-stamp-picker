@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.23';
+  var VERSION = '4.8.24';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -278,7 +278,7 @@
    * @param {Array<{id:string,name:string,color?:string}>} [options.users] 用户列表
    * @param {string} [options.currentUser] 当前用户 id
    * @param {boolean} [options.allowMulti=true] 允许多签章
-   * @param {string} [options.pdfjsUrl] pdf.js 自动加载地址（默认 CDN）
+   * @param {string} [options.pdfjsUrl] pdf.js 自动加载地址（默认 null：本地探测 vendor/ 优先，失败才 CDN）
    * @param {object} [options.pdfjs] 已有 pdfjsLib 实例
    */
   function PdfStampPicker(container, options) {
@@ -307,7 +307,7 @@
       stampMargin: 12,   // 签章距页面边界的最小间距(px)，0=紧贴边界不可超出
       minStampSize: 24,   // 废弃（v4.4.3 起章固定大小，保留字段兼容）
       maxStampSize: 480,  // 废弃
-      pdfjsUrl: CDN_PDFJS,
+      pdfjsUrl: null,   // 默认 null：本地探测 vendor/ 优先（内网离线可用），全部失败才 CDN 兜底
       cMapUrl: undefined,  // 中文 PDF 的 CMap 目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
       compatCheck: true    // 旧浏览器检测：不支持 Array.at/structuredClone 时提示升级（false 关闭）
     }, options || {});
@@ -868,13 +868,8 @@
     var pdfjs = this._options.pdfjs || (typeof window !== 'undefined' && window.pdfjsLib) || null;
     if (pdfjs) {
       if (typeof window !== 'undefined' && !window.pdfjsLib) window.pdfjsLib = pdfjs;
-      // 旧浏览器不支持 .at() → 兼容 worker（polyfill 注入 worker）；无 worker 文件则 fake worker
-      if (!isAtSupported()) {
-        var w = this._resolveWorkerUrl();
-        if (w) return this._setupCompatWorker(pdfjs, w).then(function () { return pdfjs; });
-        this._forceFakeWorker(pdfjs);
-      }
-      return Promise.resolve(pdfjs);
+      // worker 统一 fetch+Blob 加载（绕开内网 MIME 严格检查 + 注入 polyfill）
+      return this._ensureWorker(pdfjs).then(function () { return pdfjs; });
     }
     if (this._pdfjsPromise) return this._pdfjsPromise;
     this._pdfjsPromise = (this._options.pdfjsUrl
@@ -882,13 +877,7 @@
       : PdfStampPicker.loadPdfJsAuto(self._libSrc)          // 本地探测 → CDN 兜底（传库位置，异步时 currentScript 失效）
     ).then(function (lib) {
       self._options.pdfjs = lib;
-      // 旧浏览器不支持 .at() → 兼容 worker；无 worker 文件则 fake worker
-      if (!isAtSupported()) {
-        var w2 = self._resolveWorkerUrl();
-        if (w2) return self._setupCompatWorker(lib, w2).then(function () { return lib; });
-        self._forceFakeWorker(lib);
-      }
-      return lib;
+      return self._ensureWorker(lib).then(function () { return lib; });
     });
     return this._pdfjsPromise;
   };
@@ -904,6 +893,20 @@
     if (!base) return null;
     var clean = String(base).split('?')[0].split('#')[0];
     return clean.replace(/pdf(\.min)?\.js$/, 'pdf.worker$1.js');
+  };
+
+  /** 确保 worker 可用：统一 fetch+Blob 加载 worker（绕内网 MIME 严格检查 + 注入 polyfill） */
+  PdfStampPicker.prototype._ensureWorker = function (pdfjs) {
+    var self = this;
+    // 优先用 pdf.js 已设置的 workerSrc（loadPdfJsAuto/loadPdfJs 已按探测结果设置），否则推断
+    var workerUrl = (pdfjs && pdfjs.GlobalWorkerOptions && pdfjs.GlobalWorkerOptions.workerSrc)
+      ? pdfjs.GlobalWorkerOptions.workerSrc
+      : this._resolveWorkerUrl();
+    if (!workerUrl) {
+      this._forceFakeWorker(pdfjs);
+      return Promise.resolve();
+    }
+    return this._setupCompatWorker(pdfjs, workerUrl);
   };
 
   /** 强制 pdf.js 使用 fake worker（主线程模拟）——旧浏览器 worker 内无法注入 polyfill 时用 */
@@ -926,13 +929,15 @@
   PdfStampPicker.prototype._setupCompatWorker = function (pdfjs, workerFileUrl) {
     var self = this;
     try {
-      if (!workerFileUrl || isAtSupported()) return Promise.resolve();
+      if (!workerFileUrl) return Promise.resolve();
       // 主线程 polyfill 再确保（构造时已注入，此处保险）
       ensureAtPolyfill();
       ensureStructuredClonePolyfill();
       ensureReplaceAllPolyfill();
       var absUrl = new URL(workerFileUrl, window.location.href).href;
-      // fetch worker 源码，头部注入 polyfill
+      // ★ fetch worker 源码 → Blob URL：
+      //   ① 绕开内网服务器 nosniff/错误 MIME 的 strict MIME checking（new Worker 会被拒）
+      //   ② 头部注入 polyfill（Edge90 等旧内核需要，现代浏览器无害）
       return fetch(absUrl).then(function (res) {
         if (!res.ok) throw new Error('worker fetch fail');
         return res.text();
