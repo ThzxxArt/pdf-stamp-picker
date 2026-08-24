@@ -116,7 +116,7 @@ const json = await PdfStampPicker.openModal({
 
 **弹窗交互**：点击遮罩 / ✕ / 取消按钮 → resolve null；确认 → resolve toJSON()。`onConfirm(json)` 可返回 Promise 阻止关闭（如先提交到后端再关）。
 
-完整参数：`source` `json`（回显已有签章） `title` `users` `currentUser` `width` `height` `mode` `confirmText` `cancelText` `requireStamp`（至少一个签章点） `requireAllUsers`（**每个签署方至少一个签章点**，优先于 requireStamp） `includeImage`（**确认返回的 JSON 含章图 dataURL**，数据自包含） `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（透传给选择器）。
+完整参数：`source` `json`（回显已有签章） `title` `users` `currentUser` `width` `height` `mode` `confirmText` `cancelText` `requireStamp`（至少一个签章点） `requireAllUsers`（**每个签署方至少一个签章点**，优先于 requireStamp） `includeImage`（**确认返回的 JSON 含章图 dataURL**，数据自包含） `closeOnBackdrop` `onConfirm(json)` `onCancel()` `pickerOptions`（**透传给选择器**——所有构造选项如 `stampMargin`/`toolbar`/`theme` 等都在这里配，弹窗与容器行为一致）。
 
 **弹窗确认含章图**：`openModal({ includeImage: true })` → 确认返回的 JSON 每个签章点带 `image`（dataURL），后端可直接盖章渲染。
 
