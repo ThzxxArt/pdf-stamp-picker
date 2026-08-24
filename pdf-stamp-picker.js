@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.9';
+  var VERSION = '4.8.10';
 
   /* ====================== 常量 ====================== */
 
@@ -829,8 +829,12 @@
     var pdfjs = this._options.pdfjs || (typeof window !== 'undefined' && window.pdfjsLib) || null;
     if (pdfjs) {
       if (typeof window !== 'undefined' && !window.pdfjsLib) window.pdfjsLib = pdfjs;
-      // 旧浏览器不支持 .at() → 强制 fake worker（主线程模拟，polyfill 生效）
-      if (!isAtSupported()) this._forceFakeWorker(pdfjs);
+      // 旧浏览器不支持 .at() → 兼容 worker（polyfill 注入 worker）；无 worker 文件则 fake worker
+      if (!isAtSupported()) {
+        var w = this._resolveWorkerUrl();
+        if (w) this._setupCompatWorker(pdfjs, w);
+        else this._forceFakeWorker(pdfjs);
+      }
       return Promise.resolve(pdfjs);
     }
     if (this._pdfjsPromise) return this._pdfjsPromise;
@@ -839,11 +843,28 @@
       : PdfStampPicker.loadPdfJsAuto()                      // 本地探测 → CDN 兜底
     ).then(function (lib) {
       self._options.pdfjs = lib;
-      // 旧浏览器不支持 .at() → fake worker（主线程跑 worker 逻辑，polyfill 生效）
-      if (!isAtSupported()) self._forceFakeWorker(lib);
+      // 旧浏览器不支持 .at() → 兼容 worker；无 worker 文件则 fake worker
+      if (!isAtSupported()) {
+        var w2 = self._resolveWorkerUrl();
+        if (w2) self._setupCompatWorker(lib, w2);
+        else self._forceFakeWorker(lib);
+      }
       return lib;
     });
     return this._pdfjsPromise;
+  };
+
+  /** 解析 worker 文件 URL（从 pdfjsUrl 或探测候选推断） */
+  PdfStampPicker.prototype._resolveWorkerUrl = function () {
+    var base = this._options.pdfjsUrl || null;
+    if (!base) {
+      // 从探测链拿（与 loadPdfJsAuto 同规则）
+      var cands = PdfStampPicker._localCandidates(window.location.href, (document.currentScript && document.currentScript.src) || null);
+      if (cands.length) base = cands[0];
+    }
+    if (!base) return null;
+    var clean = String(base).split('?')[0].split('#')[0];
+    return clean.replace(/pdf(\.min)?\.js$/, 'pdf.worker$1.js');
   };
 
   /** 强制 pdf.js 使用 fake worker（主线程模拟）——旧浏览器 worker 内无法注入 polyfill 时用 */
@@ -856,6 +877,27 @@
         pdfjs.PDFWorker._workerPorts.clear && pdfjs.PDFWorker._workerPorts.clear();
       }
     } catch (e) { /* ignore */ }
+  };
+
+  /**
+   * 旧浏览器（不支持 Array.at/structuredClone）的终极兜底：
+   * 用 data: URL 内联 worker，把 polyfill 注入 worker 源码再 importScripts 真实 worker 文件。
+   * 这样即使 worker 是独立线程，polyfill 也在其中生效。
+   */
+  PdfStampPicker.prototype._setupCompatWorker = function (pdfjs, workerFileUrl) {
+    try {
+      if (!workerFileUrl || isAtSupported()) return;
+      // polyfill 源码（注入 worker 内）
+      var polyfillCode = 'if(!Array.prototype.at){Array.prototype.at=function(n){n=Number(n);var l=this.length;if(n<0)n=Math.max(l+n,0);return n>=0&&n<l?this[n]:void 0;}};'
+        + 'if(typeof structuredClone==="undefined"){self.structuredClone=function(o){try{return JSON.parse(JSON.stringify(o))}catch(e){return o}};};';
+      // data: URL worker：先跑 polyfill，再 importScripts 真实 worker
+      var workerCode = polyfillCode + 'importScripts("' + workerFileUrl + '");';
+      var blob = new Blob([workerCode], { type: 'application/javascript' });
+      var workerUrl = URL.createObjectURL(blob);
+      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+      // 记录以便后续 revoke（避免泄漏）
+      this._compatWorkerUrl = workerUrl;
+    } catch (e) { /* ignore：失败则走 fake worker */ }
   };
 
   /**
@@ -2748,6 +2790,11 @@
     this._pinch = null;
     if (this._pinchRaf) cancelAnimationFrame(this._pinchRaf);
     this._pinchRaf = 0;
+    // 释放兼容 worker 的 blob URL
+    if (this._compatWorkerUrl && typeof URL !== 'undefined') {
+      try { URL.revokeObjectURL(this._compatWorkerUrl); } catch (e) { /* ignore */ }
+      this._compatWorkerUrl = null;
+    }
     // 释放缓存引用（实例被外部持有时也能被 GC 回收）
     this._imgCache = null;
     this._pdfBytes = null;
