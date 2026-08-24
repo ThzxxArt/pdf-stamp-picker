@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.6';
+  var VERSION = '4.8.7';
 
   /* ====================== 常量 ====================== */
 
@@ -852,7 +852,9 @@
       s.src = src;
       s.onload = function () {
         if (window.pdfjsLib) {
-          var workerSrc = (url ? url.replace(/pdf(\.min)?\.js$/, 'pdf.worker$1.js') : CDN_PDFJS_WORKER);
+          // 推断 worker：先去掉 query/hash 再替换（修复带 ?v= 时推断失败）
+          var cleanUrl = String(url || '').split('?')[0].split('#')[0];
+          var workerSrc = (url ? cleanUrl.replace(/pdf(\.min)?\.js$/, 'pdf.worker$1.js') : CDN_PDFJS_WORKER);
           window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.pdfjsLib.GlobalWorkerOptions.workerSrc || workerSrc;
           resolve(window.pdfjsLib);
         } else {
@@ -916,7 +918,8 @@
         s.src = src;
         s.onload = function () {
           if (window.pdfjsLib) {
-            var workerSrc = src.replace(/pdf(\.min)?\.js$/, 'pdf.worker$1.js');
+            var cleanSrc = String(src).split('?')[0].split('#')[0];
+            var workerSrc = cleanSrc.replace(/pdf(\.min)?\.js$/, 'pdf.worker$1.js');
             window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.pdfjsLib.GlobalWorkerOptions.workerSrc || workerSrc;
             resolve(window.pdfjsLib);
           } else {
