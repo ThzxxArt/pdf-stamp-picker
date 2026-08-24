@@ -52,6 +52,8 @@ export interface PdfStampPickerOptions {
   stampImage?: string | File | HTMLCanvasElement | null;
   /** 签章图显示基准宽度 px（默认 120） */
   stampSize?: number;
+  /** 签章距页面边界的最小间距 px（默认 12；0=紧贴边界） */
+  stampMargin?: number;
   /** 签章图最小显示尺寸 px（默认 24） */
   minStampSize?: number;
   /** 签章图最大显示尺寸 px（默认 480） */

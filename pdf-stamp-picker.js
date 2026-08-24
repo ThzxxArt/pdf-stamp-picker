@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.16';
+  var VERSION = '4.8.17';
 
   /* ====================== 常量 ====================== */
 
@@ -295,6 +295,7 @@
       allowMulti: true,
       stampImage: null,
       stampSize: 120,
+      stampMargin: 12,   // 签章距页面边界的最小间距(px)，0=紧贴边界不可超出
       minStampSize: 24,   // 废弃（v4.4.3 起章固定大小，保留字段兼容）
       maxStampSize: 480,  // 废弃
       pdfjsUrl: CDN_PDFJS,
@@ -1399,12 +1400,23 @@
     return { w: w, h: ratio ? w / ratio : w };
   };
 
-  /** 计算中心对准 (x,y) 且 clamp 不出边界的矩形 */
+  /** 签章可活动范围（带 stampMargin 间距，不出边界） */
+  PdfStampPicker.prototype._stampBounds = function () {
+    var m = this._options.stampMargin || 0;
+    return {
+      minX: m, minY: m,
+      maxX: Math.max(m, this._displayW - m),
+      maxY: Math.max(m, this._displayH - m)
+    };
+  };
+
+  /** 计算中心对准 (x,y) 且 clamp 在【带间距边界】内的矩形 */
   PdfStampPicker.prototype._stampRectAt = function (x, y) {
     var size = this._stampDisplaySize();
+    var b = this._stampBounds();
     return {
-      x: clamp(x - size.w / 2, 0, Math.max(0, this._displayW - size.w)),
-      y: clamp(y - size.h / 2, 0, Math.max(0, this._displayH - size.h)),
+      x: clamp(x - size.w / 2, b.minX, Math.max(b.minX, b.maxX - size.w)),
+      y: clamp(y - size.h / 2, b.minY, Math.max(b.minY, b.maxY - size.h)),
       w: size.w, h: size.h
     };
   };
@@ -2365,11 +2377,21 @@
 
     if (d.type === 'move') {
       var dx = x - d.startX, dy = y - d.startY;
-      this._sel = {
-        x: clamp(d.sel.x + dx, 0, this._displayW - d.sel.w),
-        y: clamp(d.sel.y + dy, 0, this._displayH - d.sel.h),
-        w: d.sel.w, h: d.sel.h
-      };
+      if (this._options.mode === 'stamp') {
+        // 签章拖动：带间距边界（stampMargin）
+        var b = this._stampBounds();
+        this._sel = {
+          x: clamp(d.sel.x + dx, b.minX, Math.max(b.minX, b.maxX - d.sel.w)),
+          y: clamp(d.sel.y + dy, b.minY, Math.max(b.minY, b.maxY - d.sel.h)),
+          w: d.sel.w, h: d.sel.h
+        };
+      } else {
+        this._sel = {
+          x: clamp(d.sel.x + dx, 0, this._displayW - d.sel.w),
+          y: clamp(d.sel.y + dy, 0, this._displayH - d.sel.h),
+          w: d.sel.w, h: d.sel.h
+        };
+      }
     } else if (d.type === 'draw') {
       if (this._options.mode === 'point') {
         this._sel = { x: x, y: y, w: 0, h: 0 };
@@ -2453,8 +2475,15 @@
   PdfStampPicker.prototype._moveSel = function (dx, dy) {
     var s = this._sel;
     if (!s) return;
-    s.x = clamp(s.x + dx, 0, Math.max(0, this._displayW - s.w));
-    s.y = clamp(s.y + dy, 0, Math.max(0, this._displayH - s.h));
+    if (this._options.mode === 'stamp') {
+      // 签章键盘移动：带间距边界（stampMargin）
+      var b = this._stampBounds();
+      s.x = clamp(s.x + dx, b.minX, Math.max(b.minX, b.maxX - s.w));
+      s.y = clamp(s.y + dy, b.minY, Math.max(b.minY, b.maxY - s.h));
+    } else {
+      s.x = clamp(s.x + dx, 0, Math.max(0, this._displayW - s.w));
+      s.y = clamp(s.y + dy, 0, Math.max(0, this._displayH - s.h));
+    }
     this._paint();
     this._commitActive();
     this._emit('change', this.getSelection());
