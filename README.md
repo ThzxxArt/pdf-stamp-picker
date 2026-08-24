@@ -10,7 +10,7 @@
 
 > ⚠️ 定位说明：这是**签章点坐标选择器**，不是真实盖章渲染器。输出的是签章位置坐标 + 归属用户，**不输出图片**。页面上的公章图只是拖放定位的视觉载体，放置后显示为带用户颜色的占位框。
 
-v4.8 特性：**默认签章模式（点击即放章，章固定大小+边界间距可配，定位/框选立即直观反馈）** · **JSON 按用户分组（users[].stamps[]）** · **document.hash（PDF SHA-256 文件指纹）** · **JSON 导入反显 + 可选含图导出（importJSON + toJSON({includeImage}) + 弹窗传 json）** · 多签章点 · 多用户动态管理 · 撤销/重做 · 一键弹窗（宽高/模式/校验/含图可配：requireStamp / requireAllUsers / includeImage）· **工具栏按钮可配置隐藏** · 统一加载（含进度/中止/哈希）· pdf.js 离线资源（cMaps 中文不乱码）· **旧浏览器自动兼容（polyfill + worker 源码注入，Edge 90 可用）** · **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
+v4.8 特性：**默认签章模式（点击即放章，章固定大小+边界间距可配，定位/框选立即直观反馈）** · **JSON 按用户分组（users[].stamps[]）** · **document.hash（PDF SHA-256 文件指纹）** · **JSON 导入反显 + 可选含图导出（importJSON + toJSON({includeImage}) + 弹窗传 json）** · 多签章点 · 多用户动态管理 · 撤销/重做 · 一键弹窗（宽高/模式/校验/含图可配：requireStamp / requireAllUsers / includeImage）· **工具栏按钮可配置隐藏** · 统一加载（含进度/中止/哈希）· pdf.js 离线资源（cMaps 中文不乱码）· **旧浏览器自动兼容（polyfill + worker 源码注入，Edge 90 可用）** · **内网严格 MIME 自动兜底（pdf.min.js + worker 均 fetch+Blob，nosniff/错误 MIME 也能加载）** · **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
 
 ## 快速开始（真实项目只需一个容器）
 
@@ -41,11 +41,20 @@ v4.8 特性：**默认签章模式（点击即放章，章固定大小+边界间
 
 加载优先级：**传入 `pdfjs` 实例 > 全局 `window.pdfjsLib` > 配置 `pdfjsUrl` > 自动探测本地 > CDN 兜底**。
 
+> **v4.8.24 起默认 `pdfjsUrl` 为 `null`**（不再是 CDN 地址）——保证自动探测本地 `vendor/` 优先，全部失败才回退 CDN。这是内网/离线可用的关键前提。
+
 零配置时自动探测本地路径（按顺序）：
 1. 库文件同目录 `vendor/pdf.min.js`
 2. 宿主页面同目录 `vendor/pdf.min.js` / `../vendor/pdf.min.js` / `libs/pdf.min.js`
 
 全部找不到才回退 CDN（cdnjs）。所以项目里只要把 `pdf-stamp-picker.js` 和 `vendor/` 放一起，**离线/内网环境零配置可用**。worker 自动按 `pdf.min.js → pdf.worker.min.js` 规则推断。
+
+**内网严格 MIME 环境自动兜底（v4.8.23/4.8.24）**：有些内网服务器对 `.js` 返回非标准 MIME（如 `text/html`）或加 `X-Content-Type-Options: nosniff`，浏览器 strict MIME checking 会拒绝执行 `<script>` 标签加载的 pdf.min.js、拒绝 `new Worker()` 加载的 pdf.worker.min.js。库对此**自动 fetch 源码 → Blob 执行**绕开严格检查：
+
+- `pdf.min.js`：script 标签失败 → 同 URL fetch 源码 → `Blob(type=application/javascript)` 执行
+- `pdf.worker.min.js`：统一 fetch 源码 → 注入 polyfill → Blob URL 创建 worker（**对所有浏览器生效**，不再仅限旧内核）
+
+因此内网只需保证 `vendor/` 三件套（pdf.min.js + pdf.worker.min.js + cMaps/）**HTTP 200 可达**即可，无需纠结服务器 MIME 配置。
 
 **中文 PDF 离线不乱码（CMap 本地化）**：中文合同 PDF 常用 GBK/UniGB 字体映射，pdf.js 默认从 CDN 拉取。库会**自动探测本地 `cMaps/` 目录**（库同目录或页面目录，放 pdf.js 官方 `cmaps/` 解压内容），找到即本地加载；也可显式配置：
 
@@ -376,7 +385,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | `minStampSize` / `maxStampSize` | `24` / `480` | ⚠️ 已废弃（v4.4.3 起章固定大小，此两项不再生效） |
 | `pdfjsUrl` | 自动探测 | 显式指定 pdf.js 地址（默认自动探测本地 vendor → CDN 兜底） |
 | `cMapUrl` | 自动探测 | 中文 PDF 字体映射目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN） |
-| `compatCheck` | `true` | 旧浏览器兼容策略：默认自动兼容（polyfill + worker 源码注入，Edge 90 可用）；`true` 强制提示升级；`false` 纯兜底不提示 |
+| `compatCheck` | `true` | 旧浏览器兼容策略：默认自动兼容（polyfill：`Array.at`/`structuredClone`/`String.replaceAll` + worker 源码注入，Edge 90 可用）；`true` 强制提示升级；`false` 纯兜底不提示 |
 | `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载，优先级最高） |
 
 ### 方法（实例 40 个，全部）
@@ -472,7 +481,8 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 ## 浏览器兼容
 
 - **现代浏览器**：Chrome/Edge/Firefox/Safari 近两个大版本（Pointer Events + ResizeObserver，无 RO 自动回退）
-- **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖多项现代 API（`Array.at` 92+、`structuredClone` 98+、可选链等）。库**自动兼容**：注入 polyfill + **worker 源码注入**（fetch worker 文件 → 头部拼 polyfill → Blob 创建改造 worker），Edge 90 真能跑 pdf.js；worker 文件不可达时回退 fake worker；`compatCheck` 可配（默认自动兼容，`true` 强制提示升级，`false` 纯兜底）
+- **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖多项现代 API（`Array.at` 92+、`structuredClone` 98+、`String.replaceAll` 85+、可选链等）。库**自动兼容**：注入 polyfill + **worker 源码注入**（fetch worker 文件 → 头部拼 polyfill → Blob 创建改造 worker），Edge 90 真能跑 pdf.js；worker 文件不可达时回退 fake worker；`compatCheck` 可配（默认自动兼容，`true` 强制提示升级，`false` 纯兜底）
+- **worker fetch + Blob 加载对所有浏览器生效**（v4.8.24 起）：不仅旧内核，现代浏览器的 `new Worker()` 也会因内网 `nosniff`/错误 MIME 被拒，故 worker 统一走 fetch 源码 → Blob URL，天然绕开 strict MIME checking
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 
 ## 运行 Demo
