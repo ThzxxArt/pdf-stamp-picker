@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.11';
+  var VERSION = '4.8.12';
 
   /* ====================== 常量 ====================== */
 
@@ -890,8 +890,9 @@
       // polyfill 源码（注入 worker 内；用 defineProperty 不可枚举，避免 pdf.js 的 for...in 防御检查报错）
       var polyfillCode = 'if(!Array.prototype.at){Object.defineProperty(Array.prototype,"at",{value:function(n){n=Number(n);var l=this.length;if(n<0)n=Math.max(l+n,0);return n>=0&&n<l?this[n]:void 0;},writable:true,configurable:true,enumerable:false});}'
         + 'if(typeof structuredClone==="undefined"){self.structuredClone=function(o){try{return JSON.parse(JSON.stringify(o))}catch(e){return o}};};';
-      // data: URL worker：先跑 polyfill，再 importScripts 真实 worker
-      var workerCode = polyfillCode + 'importScripts("' + workerFileUrl + '");';
+      // data: URL worker：先跑 polyfill，再 importScripts 真实 worker（URL 需绝对路径，importScripts 不支持相对）
+      var absWorkerUrl = new URL(workerFileUrl, window.location.href).href;
+      var workerCode = polyfillCode + 'importScripts("' + absWorkerUrl + '");';
       var blob = new Blob([workerCode], { type: 'application/javascript' });
       var workerUrl = URL.createObjectURL(blob);
       pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
