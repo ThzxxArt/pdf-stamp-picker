@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.12';
+  var VERSION = '4.8.13';
 
   /* ====================== 常量 ====================== */
 
@@ -740,7 +740,8 @@
       if (!res.ok) throw new Error('[PdfStampPicker] 加载 PDF 失败 HTTP ' + res.status + ' ' + res.statusText);
       var total = parseInt(res.headers.get('Content-Length') || '0', 10) || 0;
       var reader = res.body && res.body.getReader ? res.body.getReader() : null;
-      if (!reader) return res.arrayBuffer(); // 无流式支持时直接取
+      // 旧浏览器（不支持 Array.at，如 Edge 90）的 fetch 流式读取有已知 bug，可能读成空 body → 直接一次性 arrayBuffer
+      if (!reader || !isAtSupported()) return res.arrayBuffer();
       var chunks = [];
       var received = 0;
       var pump = function () {
