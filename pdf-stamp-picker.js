@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.18';
+  var VERSION = '4.8.19';
 
   /* ====================== 常量 ====================== */
 
@@ -336,6 +336,11 @@
     this._destroyed = false;
     this._stampImg = null;   // {src, name, w, h, el(Image)}
 
+    // ★ 记录浏览器【原生】兼容性（必须在 polyfill 注入之前——否则 polyfill 会"骗过"检测）
+    this._nativeCompat = {
+      at: typeof Array.prototype.at === 'function' && [1].at(0) === 1,
+      structuredClone: typeof structuredClone === 'function'
+    };
     // 兼容旧浏览器：pdf.js 3.11 依赖 Array.prototype.at() / structuredClone，先注入 polyfill
     ensureAtPolyfill();
     ensureStructuredClonePolyfill();
@@ -639,11 +644,14 @@
     var p;
 
     // 浏览器兼容检测：pdf.js 3.11 需要多项现代 API，不满足（如 Chrome<98/Edge<98/FF<94/Safari<15.4）→ 友好提示升级
-    if (this._options.compatCheck !== false) {
-      var compat = isCompatSupported();
-      if (!compat.ok) {
-        this._showCompatWarning(compat.missing);
-        return Promise.reject(new Error('当前浏览器版本过旧，无法加载 PDF。缺少：' + compat.missing.join('、') + '。请升级到 Chrome/Edge 98+、Firefox 94+ 或 Safari 15.4+。'));
+    // ★ 用构造时记录的【原生】兼容标志（polyfill 注入后会污染 Array.at 检测，必须用原生判断）
+    if (this._options.compatCheck !== false && this._nativeCompat) {
+      var missing = [];
+      if (!this._nativeCompat.at) missing.push('Array.at');
+      if (!this._nativeCompat.structuredClone) missing.push('structuredClone');
+      if (missing.length) {
+        this._showCompatWarning(missing);
+        return Promise.reject(new Error('当前浏览器版本过旧，无法加载 PDF。缺少：' + missing.join('、') + '。请升级到 Chrome/Edge 98+、Firefox 94+ 或 Safari 15.4+。'));
       }
     }
 
