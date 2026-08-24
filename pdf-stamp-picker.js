@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.20';
+  var VERSION = '4.8.21';
 
   /* ====================== 常量 ====================== */
 
@@ -303,6 +303,9 @@
       compatCheck: true    // 旧浏览器检测：不支持 Array.at/structuredClone 时提示升级（false 关闭）
     }, options || {});
     if (options && options.pdfjs) this._options.pdfjs = options.pdfjs;
+
+    // ★ 记录库脚本自身位置（同步执行时 currentScript 有效；异步 load 时探测用）
+    this._libSrc = (document.currentScript && document.currentScript.src) || null;
 
     // 用户与颜色
     this._users = (this._options.users && this._options.users.length)
@@ -864,7 +867,7 @@
     if (this._pdfjsPromise) return this._pdfjsPromise;
     this._pdfjsPromise = (this._options.pdfjsUrl
       ? PdfStampPicker.loadPdfJs(this._options.pdfjsUrl)   // 用户显式指定
-      : PdfStampPicker.loadPdfJsAuto()                      // 本地探测 → CDN 兜底
+      : PdfStampPicker.loadPdfJsAuto(self._libSrc)          // 本地探测 → CDN 兜底（传库位置，异步时 currentScript 失效）
     ).then(function (lib) {
       self._options.pdfjs = lib;
       // 旧浏览器不支持 .at() → 兼容 worker；无 worker 文件则 fake worker
@@ -882,8 +885,8 @@
   PdfStampPicker.prototype._resolveWorkerUrl = function () {
     var base = this._options.pdfjsUrl || null;
     if (!base) {
-      // 从探测链拿（与 loadPdfJsAuto 同规则）
-      var cands = PdfStampPicker._localCandidates(window.location.href, (document.currentScript && document.currentScript.src) || null);
+      // 从探测链拿（用构造时记录的库位置，异步时 currentScript 失效）
+      var cands = PdfStampPicker._localCandidates(window.location.href, this._libSrc || null);
       if (cands.length) base = cands[0];
     }
     if (!base) return null;
@@ -1013,10 +1016,11 @@
   /**
    * 自动探测加载 pdf.js：依次尝试本地候选路径，全部失败回退 CDN。
    */
-  PdfStampPicker.loadPdfJsAuto = function () {
+  PdfStampPicker.loadPdfJsAuto = function (scriptSrc) {
     if (typeof window === 'undefined') return Promise.reject(new Error('[PdfStampPicker] 仅支持浏览器环境'));
     if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
-    var scriptSrc = (document.currentScript && document.currentScript.src) || null;
+    // scriptSrc 由调用方传入（实例构造时记录的库位置）；异步调用时 currentScript 已失效
+    if (!scriptSrc) scriptSrc = (document.currentScript && document.currentScript.src) || null;
     var candidates = PdfStampPicker._localCandidates(window.location.href, scriptSrc);
     var idx = 0;
     var tryNext = function () {
