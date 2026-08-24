@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.8';
+  var VERSION = '4.8.9';
 
   /* ====================== 常量 ====================== */
 
@@ -334,8 +334,9 @@
     this._destroyed = false;
     this._stampImg = null;   // {src, name, w, h, el(Image)}
 
-    // 兼容旧浏览器：pdf.js 3.11 依赖 Array.prototype.at()，先注入 polyfill
+    // 兼容旧浏览器：pdf.js 3.11 依赖 Array.prototype.at() / structuredClone，先注入 polyfill
     ensureAtPolyfill();
+    ensureStructuredClonePolyfill();
     injectStyles();
     this._buildDOM();
     this._bindEvents();
@@ -2948,6 +2949,16 @@
   function isAtSupported() {
     try { return typeof Array.prototype.at === 'function' && [1].at(0) === 1; }
     catch (e) { return false; }
+  }
+
+  /** 兼容旧浏览器：structuredClone（Chrome98+/FF94+/Safari15.4+），pdf.js 导出图片等用到 */
+  function ensureStructuredClonePolyfill() {
+    if (typeof structuredClone === 'undefined' && typeof self !== 'undefined') {
+      self.structuredClone = function (obj) {
+        // 降级：JSON 序列化（适用于可序列化对象；pdf.js 用于 ImageBitmap 等场景的降级）
+        return JSON.parse(JSON.stringify(obj));
+      };
+    }
   }
 
   function hexToRgba(hex, alpha) {
