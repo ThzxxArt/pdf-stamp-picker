@@ -261,7 +261,8 @@ function initContainerMode() {
     controls: true,
     users: USERS,
     currentUser: 'u1',
-    zoom: 'fit-width'
+    zoom: 'fit-width',
+    stampMargin: 12   // 签章距页面边界间距（可改为 0 紧贴）
   });
   bindPicker(picker);
   // 旧浏览器（Edge 90/Chrome 91/FF 89 等）提前提示升级（库 load 也会拦，这里更早）

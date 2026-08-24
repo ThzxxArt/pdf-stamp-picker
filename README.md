@@ -10,7 +10,7 @@
 
 > ⚠️ 定位说明：这是**签章点坐标选择器**，不是真实盖章渲染器。输出的是签章位置坐标 + 归属用户，**不输出图片**。页面上的公章图只是拖放定位的视觉载体，放置后显示为带用户颜色的占位框。
 
-v4.8 特性：**默认签章模式（点击即放章，章固定大小不越界，定位/框选立即直观反馈）** · **JSON 按用户分组（users[].stamps[]）** · **document.hash（PDF SHA-256 文件指纹）** · **JSON 导入反显 + 可选含图导出（importJSON + toJSON({includeImage}) + 弹窗传 json）** · 多签章点 · 多用户动态管理 · 撤销/重做 · 一键弹窗（宽高/模式/校验/含图可配：requireStamp / requireAllUsers / includeImage）· **工具栏按钮可配置隐藏** · 统一加载（含进度/中止/哈希）· pdf.js 离线资源（cMaps 中文不乱码）· **Edge 90+ 旧浏览器兼容（自动 polyfill）** · **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
+v4.8 特性：**默认签章模式（点击即放章，章固定大小+边界间距可配，定位/框选立即直观反馈）** · **JSON 按用户分组（users[].stamps[]）** · **document.hash（PDF SHA-256 文件指纹）** · **JSON 导入反显 + 可选含图导出（importJSON + toJSON({includeImage}) + 弹窗传 json）** · 多签章点 · 多用户动态管理 · 撤销/重做 · 一键弹窗（宽高/模式/校验/含图可配：requireStamp / requireAllUsers / includeImage）· **工具栏按钮可配置隐藏** · 统一加载（含进度/中止/哈希）· pdf.js 离线资源（cMaps 中文不乱码）· **旧浏览器检测（compatCheck 提示升级）** · **零框架零依赖（纯原生 JS + Canvas + 注入 CSS）**。
 
 ## 快速开始（真实项目只需一个容器）
 
@@ -472,7 +472,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 ## 浏览器兼容
 
 - **现代浏览器**：Chrome/Edge/Firefox/Safari 近两个大版本（Pointer Events + ResizeObserver，无 RO 自动回退）
-- **旧浏览器兼容（Edge 90 等）**：pdf.js 3.11 依赖 `Array.prototype.at()`（Chrome 92+）和 `structuredClone`（Chrome 98+）。默认 `compatCheck: true` 时，检测到旧浏览器**显示友好升级提示**（页面浮层 + 明确错误），避免晦涩报错；设 `compatCheck: false` 则走 polyfill + 兼容 worker 兜底（尽力运行，不保证全功能）
+- **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖多项现代 API（`Array.at` 92+、`structuredClone` 98+、可选链等）。默认 `compatCheck: true` 时，检测到旧浏览器**显示友好升级提示**（页面浮层 + 明确错误），避免晦涩报错；设 `compatCheck: false` 则走 polyfill + fake worker 兜底（尽力运行，不保证全功能）
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 
 ## 运行 Demo
