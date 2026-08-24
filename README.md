@@ -375,6 +375,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | `minStampSize` / `maxStampSize` | `24` / `480` | ⚠️ 已废弃（v4.4.3 起章固定大小，此两项不再生效） |
 | `pdfjsUrl` | 自动探测 | 显式指定 pdf.js 地址（默认自动探测本地 vendor → CDN 兜底） |
 | `cMapUrl` | 自动探测 | 中文 PDF 字体映射目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN） |
+| `compatCheck` | `true` | 旧浏览器检测：不支持 `Array.at`/`structuredClone`（如 Edge 90）时显示升级提示并拒绝加载；`false` 关闭（走 polyfill 兜底） |
 | `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载，优先级最高） |
 
 ### 方法（实例 40 个，全部）
@@ -470,7 +471,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 ## 浏览器兼容
 
 - **现代浏览器**：Chrome/Edge/Firefox/Safari 近两个大版本（Pointer Events + ResizeObserver，无 RO 自动回退）
-- **旧浏览器兼容（Edge 90 等）**：pdf.js 3.11 依赖 `Array.prototype.at()`（Chrome 92+）和 `structuredClone`（Chrome 98+），库**自动注入 polyfill**，并用**兼容 worker**（data:URL 内联注入 polyfill 后加载真实 worker）保证 worker 线程也生效；不支持的浏览器自动回退 fake worker。**v4.8.8+ 起 Edge 90/Chrome 90 可用**
+- **旧浏览器兼容（Edge 90 等）**：pdf.js 3.11 依赖 `Array.prototype.at()`（Chrome 92+）和 `structuredClone`（Chrome 98+）。默认 `compatCheck: true` 时，检测到旧浏览器**显示友好升级提示**（页面浮层 + 明确错误），避免晦涩报错；设 `compatCheck: false` 则走 polyfill + 兼容 worker 兜底（尽力运行，不保证全功能）
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 
 ## 运行 Demo

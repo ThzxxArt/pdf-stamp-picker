@@ -60,6 +60,8 @@ export interface PdfStampPickerOptions {
   pdfjsUrl?: string;
   /** 中文 PDF 字体映射目录（显式指定 > 自动探测本地 cMaps/ > 默认 CDN） */
   cMapUrl?: string;
+  /** 旧浏览器检测：不支持 Array.at/structuredClone（如 Edge 90）时提示升级并拒绝加载；false 走 polyfill 兜底 */
+  compatCheck?: boolean;
   /** 已有 pdfjsLib 实例（可选，避免重复加载） */
   pdfjs?: unknown;
 }

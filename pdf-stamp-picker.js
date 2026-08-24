@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.14';
+  var VERSION = '4.8.15';
 
   /* ====================== 常量 ====================== */
 
@@ -298,7 +298,8 @@
       minStampSize: 24,   // 废弃（v4.4.3 起章固定大小，保留字段兼容）
       maxStampSize: 480,  // 废弃
       pdfjsUrl: CDN_PDFJS,
-      cMapUrl: undefined   // 中文 PDF 的 CMap 目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
+      cMapUrl: undefined,  // 中文 PDF 的 CMap 目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
+      compatCheck: true    // 旧浏览器检测：不支持 Array.at/structuredClone 时提示升级（false 关闭）
     }, options || {});
     if (options && options.pdfjs) this._options.pdfjs = options.pdfjs;
 
@@ -635,6 +636,12 @@
     var self = this;
     opts = opts || {};
     var p;
+
+    // 旧浏览器检测（Edge 90 等）：不支持 pdf.js 3.11 所需 API → 友好提示升级，而非晦涩报错
+    if (this._options.compatCheck !== false && !isAtSupported()) {
+      this._showCompatWarning();
+      return Promise.reject(new Error('当前浏览器版本过旧，无法加载 PDF。请升级到 Chrome/Edge 92+、Firefox 94+ 或 Safari 15.4+。'));
+    }
 
     // 中止上一次未完成的加载（切换文档时）
     if (this._abortCtrl) { try { this._abortCtrl.abort(); } catch (e) { /* ignore */ } }
@@ -1722,6 +1729,21 @@
   };
 
   /** 轻提示（内置，单例复用防 DOM 堆积） */
+  /** 旧浏览器升级提示（内联样式，零依赖） */
+  PdfStampPicker.prototype._showCompatWarning = function () {
+    if (typeof document === 'undefined') return;
+    if (document.querySelector('.psp-compat-warn')) return;
+    var el = document.createElement('div');
+    el.className = 'psp-compat-warn';
+    el.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;color:#202124;border-radius:14px;padding:28px 32px;max-width:420px;box-shadow:0 12px 48px rgba(0,0,0,.35);z-index:100001;text-align:center;font-family:system-ui,sans-serif';
+    el.innerHTML =
+      '<div style="font-size:38px;margin-bottom:12px">⚠️</div>' +
+      '<div style="font-size:16px;font-weight:600;margin-bottom:8px">浏览器版本过旧，无法加载 PDF</div>' +
+      '<div style="font-size:12.5px;color:#5f6368;line-height:1.7;margin-bottom:16px">当前浏览器不支持 PDF 签章所需的现代特性。<br>请升级到：<br><b>Chrome / Edge 92+</b> 或 <b>Firefox 94+</b> 或 <b>Safari 15.4+</b></div>' +
+      '<a href="https://www.google.com/chrome/" target="_blank" rel="noopener" style="display:inline-block;background:#1a73e8;color:#fff;border-radius:8px;padding:9px 24px;font-size:13px;font-weight:600;text-decoration:none">前往升级浏览器</a>';
+    document.body.appendChild(el);
+  };
+
   PdfStampPicker.prototype._toast = function (msg, ms) {
     if (typeof document === 'undefined') return;
     var self = this;
