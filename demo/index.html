@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PdfStampPicker v4.8.24 — 电子签章坐标选择器 Demo</title>
+<title>PdfStampPicker v4.8.25 — 电子签章坐标选择器 Demo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif; background: #f0f2f5; color: #202124; height: 100vh; display: flex; flex-direction: column; }
@@ -49,7 +49,7 @@
 <body>
 <header>
   <div class="logo">🖊</div>
-  <h1>PdfStampPicker <span class="tag">单文件 · 零依赖 · 坐标选择器</span><span class="ver" id="ver-tag">v4.8.24</span></h1>
+  <h1>PdfStampPicker <span class="tag">单文件 · 零依赖 · 坐标选择器</span><span class="ver" id="ver-tag">v4.8.25</span></h1>
   <nav class="tabs">
     <button id="tab-container" class="active">容器模式</button>
     <button id="tab-canvas">纯画布</button>
@@ -80,7 +80,7 @@
   </aside>
 </main>
 
-<script src="../pdf-stamp-picker.js?v=4.8.24"></script>
+<script src="../pdf-stamp-picker.js?v=4.8.25"></script>
 <script>
 // pdf.js 由库自动探测加载（与真实项目一致：库自动找同目录 vendor/pdf.min.js）
 
@@ -264,11 +264,12 @@ function initContainerMode() {
     stampMargin: 12   // 签章距页面边界间距（可改为 0 紧贴）
   });
   bindPicker(picker);
-  // 旧浏览器（Edge 90/Chrome 91/FF 89 等）提前提示升级（库 load 也会拦，这里更早）
-  // ★ 用实例的 _nativeCompat（原生兼容标志），避免 polyfill 污染检测
-  if (picker._options.compatCheck !== false && picker._nativeCompat) {
+  // 旧浏览器（Edge 90/Chrome 91/FF 89 等）检测：仅 compatCheck:true 时提前提示升级（库 load 也会拦，这里更早）
+  // ★ 默认 false = 自动兼容（polyfill 兜底），不提示；用实例的 _nativeCompat（原生兼容标志）避免 polyfill 污染检测
+  if (picker._options.compatCheck === true && picker._nativeCompat) {
     var __missing = [];
     if (!picker._nativeCompat.at) __missing.push('Array.at');
+    if (!picker._nativeCompat.typedArrayAt) __missing.push('TypedArray.at');
     if (!picker._nativeCompat.structuredClone) __missing.push('structuredClone');
     if (__missing.length) picker._showCompatWarning(__missing);
   }

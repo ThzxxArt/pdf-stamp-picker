@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Edge90 模拟测试</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 20px; background: #f5f5f5; }
+#stage { width: 100%; max-width: 720px; height: 560px; background: #fff; border: 1px solid #ccc; }
+#log { font-family: monospace; font-size: 12px; white-space: pre-wrap; background: #111; color: #0f0; padding: 12px; border-radius: 6px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h2>模拟 Edge 90（删除原生现代 API）验证自动兼容</h2>
+<div id="stage"></div>
+<pre id="log"></pre>
+
+<script>
+// ★ 在加载库之前，删除 Edge 90 缺失的原生 API，模拟旧内核
+window.__edge90_sim = true;
+delete Array.prototype.at;               // Chrome 92+ 才有
+delete window.structuredClone;           // Chrome 98+ 才有
+// TypedArray 的 at 定义在共享的 %TypedArray%.prototype 上（Chrome 92+），要删共享层才能真正模拟缺失
+try { delete Object.getPrototypeOf(Uint8Array.prototype).at; } catch (e) {}
+// 兜底：直接删每个 TypedArray 原型上的 at（万一有）
+var __ta = ['Int8Array','Uint8Array','Uint8ClampedArray','Int16Array','Uint16Array','Int32Array','Uint32Array','Float32Array','Float64Array'];
+for (var i = 0; i < __ta.length; i++) { if (window[__ta[i]] && window[__ta[i]].prototype) { try { delete window[__ta[i]].prototype.at; } catch (e) {} } }
+
+window.__log = function (m) { document.getElementById('log').textContent += m + '\n'; };
+window.__log('已删除原生 API：Array.at / TypedArray.at / structuredClone');
+window.__log('Array.at = ' + typeof Array.prototype.at);
+window.__log('Uint8Array.at = ' + (typeof Uint8Array !== 'undefined' ? typeof Uint8Array.prototype.at : 'N/A'));
+window.__log('structuredClone = ' + typeof window.structuredClone);
+</script>
+
+<script src="../pdf-stamp-picker.js"></script>
+<script>
+window.__log('库已加载，version = ' + (window.PdfStampPicker && PdfStampPicker.version));
+
+var stage = document.getElementById('stage');
+var __strict = /[?&]strict=1/.test(location.search);
+window.__log('模式：' + (__strict ? 'compatCheck=true（严格，应提示升级+拒绝）' : 'compatCheck=默认 false（自动兼容，应正常加载）'));
+
+var __opts = {
+  users: [
+    { id: 'u1', name: '甲方', color: '#d93025' },
+    { id: 'u2', name: '乙方', color: '#1a73e8' }
+  ],
+  currentUser: 'u1',
+  zoom: 'fit-width'
+};
+if (__strict) __opts.compatCheck = true;
+
+window.picker = new PdfStampPicker('#stage', __opts);
+
+window.__log('构造后 compatCheck = ' + picker._options.compatCheck);
+window.__log('构造后 Array.at(还原) = ' + typeof Array.prototype.at);
+window.__log('构造后 Uint8Array.at(还原) = ' + typeof Uint8Array.prototype.at);
+window.__log('构造后 structuredClone(还原) = ' + typeof window.structuredClone);
+window.__log('构造后 [1,2,3].at(-1) = ' + [1,2,3].at(-1));
+window.__log('构造后 new Uint8Array([9,8,7]).at(-1) = ' + new Uint8Array([9,8,7]).at(-1));
+window.__log('构造后 structuredClone({a:1}).a = ' + window.structuredClone({a:1}).a);
+
+picker.load({ url: 'test.pdf' }).then(function () {
+  window.__log('✅ PDF 加载成功：' + picker._docName + ' · ' + picker._totalPages + ' 页 · W=' + Math.round(picker._pdfW));
+  window.__log('兼容警告弹窗存在？ ' + (document.querySelector('.psp-compat-warn') ? '有 ❌' : '无 ✅'));
+  document.title = 'PASS';
+}).catch(function (e) {
+  window.__log('⚠️ 加载被拦截（' + (__strict ? '严格模式预期' : '❌ 非预期') + '）：' + e.message);
+  window.__log('兼容警告弹窗：' + (document.querySelector('.psp-compat-warn') ? '有 ✅' : '无 ❌'));
+  document.title = __strict ? 'STRICT-OK' : 'FAIL';
+});
+</script>
+</body>
+</html>

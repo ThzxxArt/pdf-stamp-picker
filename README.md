@@ -385,7 +385,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 | `minStampSize` / `maxStampSize` | `24` / `480` | ⚠️ 已废弃（v4.4.3 起章固定大小，此两项不再生效） |
 | `pdfjsUrl` | 自动探测 | 显式指定 pdf.js 地址（默认自动探测本地 vendor → CDN 兜底） |
 | `cMapUrl` | 自动探测 | 中文 PDF 字体映射目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN） |
-| `compatCheck` | `true` | 旧浏览器兼容策略：默认自动兼容（polyfill：`Array.at`/`structuredClone`/`String.replaceAll` + worker 源码注入，Edge 90 可用）；`true` 强制提示升级；`false` 纯兜底不提示 |
+| `compatCheck` | `false` | 旧浏览器兼容策略：默认 `false` 自动兼容（polyfill：`Array.at`/`TypedArray.at`/`structuredClone`/`String.replaceAll` + worker 源码注入，Edge 90 可用，**不提示**）；`true` 检测到原生缺失时提示升级并拒绝加载 |
 | `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载，优先级最高） |
 
 ### 方法（实例 40 个，全部）
@@ -481,7 +481,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 ## 浏览器兼容
 
 - **现代浏览器**：Chrome/Edge/Firefox/Safari 近两个大版本（Pointer Events + ResizeObserver，无 RO 自动回退）
-- **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖多项现代 API（`Array.at` 92+、`structuredClone` 98+、`String.replaceAll` 85+、可选链等）。库**自动兼容**：注入 polyfill + **worker 源码注入**（fetch worker 文件 → 头部拼 polyfill → Blob 创建改造 worker），Edge 90 真能跑 pdf.js；worker 文件不可达时回退 fake worker；`compatCheck` 可配（默认自动兼容，`true` 强制提示升级，`false` 纯兜底）
+- **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖多项现代 API（`Array.at` 92+、`TypedArray.at` 92+、`structuredClone` 98+、`String.replaceAll` 85+、可选链等）。库**自动兼容**：注入 polyfill（含 TypedArray.at）+ **worker 源码注入**（fetch worker 文件 → 头部拼 polyfill → Blob 创建改造 worker），Edge 90 真能跑 pdf.js；worker 文件不可达时回退 fake worker。`compatCheck` 可配：**默认 `false` 自动兼容不提示**，`true` 才提示升级并拒绝加载
 - **worker fetch + Blob 加载对所有浏览器生效**（v4.8.24 起）：不仅旧内核，现代浏览器的 `new Worker()` 也会因内网 `nosniff`/错误 MIME 被拒，故 worker 统一走 fetch 源码 → Blob URL，天然绕开 strict MIME checking
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 

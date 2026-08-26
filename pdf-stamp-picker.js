@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.24';
+  var VERSION = '4.8.25';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -309,7 +309,7 @@
       maxStampSize: 480,  // 废弃
       pdfjsUrl: null,   // 默认 null：本地探测 vendor/ 优先（内网离线可用），全部失败才 CDN 兜底
       cMapUrl: undefined,  // 中文 PDF 的 CMap 目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
-      compatCheck: true    // 旧浏览器检测：不支持 Array.at/structuredClone 时提示升级（false 关闭）
+      compatCheck: false   // 旧浏览器检测：true=检测到原生缺失就提示升级+拒绝加载；默认 false=自动兼容(polyfill 兜底,不提示)
     }, options || {});
     if (options && options.pdfjs) this._options.pdfjs = options.pdfjs;
 
@@ -352,10 +352,12 @@
     // ★ 记录浏览器【原生】兼容性（必须在 polyfill 注入之前——否则 polyfill 会"骗过"检测）
     this._nativeCompat = {
       at: typeof Array.prototype.at === 'function' && [1].at(0) === 1,
+      typedArrayAt: typeof Uint8Array !== 'undefined' && typeof Uint8Array.prototype.at === 'function',
       structuredClone: typeof structuredClone === 'function'
     };
     // 兼容旧浏览器：pdf.js 3.11 依赖 Array.prototype.at() / structuredClone，先注入 polyfill
     ensureAtPolyfill();
+    ensureTypedArrayAtPolyfill();
     ensureStructuredClonePolyfill();
     ensureReplaceAllPolyfill();
     injectStyles();
@@ -657,11 +659,13 @@
     opts = opts || {};
     var p;
 
-    // 浏览器兼容检测：pdf.js 3.11 需要多项现代 API，不满足（如 Chrome<98/Edge<98/FF<94/Safari<15.4）→ 友好提示升级
+    // 浏览器兼容检测：pdf.js 3.11 需要多项现代 API（Array.at/TypedArray.at/structuredClone 等）
+    // 默认自动兼容（polyfill 兜底）；仅 compatCheck:true 时，原生缺失才提示升级+拒绝加载
     // ★ 用构造时记录的【原生】兼容标志（polyfill 注入后会污染 Array.at 检测，必须用原生判断）
-    if (this._options.compatCheck !== false && this._nativeCompat) {
+    if (this._options.compatCheck === true && this._nativeCompat) {
       var missing = [];
       if (!this._nativeCompat.at) missing.push('Array.at');
+      if (!this._nativeCompat.typedArrayAt) missing.push('TypedArray.at');
       if (!this._nativeCompat.structuredClone) missing.push('structuredClone');
       if (missing.length) {
         this._showCompatWarning(missing);
@@ -932,6 +936,7 @@
       if (!workerFileUrl) return Promise.resolve();
       // 主线程 polyfill 再确保（构造时已注入，此处保险）
       ensureAtPolyfill();
+      ensureTypedArrayAtPolyfill();
       ensureStructuredClonePolyfill();
       ensureReplaceAllPolyfill();
       var absUrl = new URL(workerFileUrl, window.location.href).href;
@@ -944,7 +949,8 @@
       }).then(function (src) {
         var polyfillCode =
           'if(!Array.prototype.at){Object.defineProperty(Array.prototype,"at",{value:function(n){n=Number(n);var l=this.length;if(n<0)n=Math.max(l+n,0);return n>=0&&n<l?this[n]:void 0;},writable:true,configurable:true,enumerable:false});}' +
-          'if(typeof structuredClone==="undefined"){self.structuredClone=function(o){try{return JSON.parse(JSON.stringify(o))}catch(e){return o}};};' +
+          'if(!Uint8Array.prototype.at){var __ta=[Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array];if(typeof BigInt64Array!=="undefined"){__ta.push(BigInt64Array,BigUint64Array)}for(var __i=0;__i<__ta.length;__i++){Object.defineProperty(__ta[__i].prototype,"at",{value:function(n){n=Number(n);var l=this.length;if(n<0)n=Math.max(l+n,0);return n>=0&&n<l?this[n]:void 0;},writable:true,configurable:true,enumerable:false});}}' +
+          'if(typeof structuredClone==="undefined"){self.structuredClone=function(o){return o;};};' +
           'if(typeof String.prototype.replaceAll==="undefined"){Object.defineProperty(String.prototype,"replaceAll",{value:function(search,replace){var self=this;if(search instanceof RegExp){if(!search.global)throw new TypeError("replaceAll must be called with a global RegExp");return self.replace(search,replace);}return self.split(search).join(replace);},writable:true,configurable:true,enumerable:false});};';
         // 头部注释保留（license），polyfill 插在首个可执行代码前
         var injected = src;
@@ -3152,6 +3158,29 @@
     }
   }
 
+  /** 兼容旧浏览器：TypedArray.prototype.at()（Chrome<92 同样缺失），pdf.js 对 Uint8Array 等也会用 .at(-1) */
+  function ensureTypedArrayAtPolyfill() {
+    var g = (typeof globalThis !== 'undefined') ? globalThis : (typeof self !== 'undefined' ? self : window);
+    if (!g) return;
+    var types = ['Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array',
+      'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array'];
+    if (typeof BigInt64Array !== 'undefined') { types.push('BigInt64Array', 'BigUint64Array'); }
+    for (var i = 0; i < types.length; i++) {
+      var Ctor = g[types[i]];
+      if (Ctor && !Ctor.prototype.at) {
+        Object.defineProperty(Ctor.prototype, 'at', {
+          value: function (index) {
+            var n = Number(index);
+            var len = this.length;
+            if (n < 0) n = Math.max(len + n, 0);
+            return n >= 0 && n < len ? this[n] : undefined;
+          },
+          writable: true, configurable: true, enumerable: false
+        });
+      }
+    }
+  }
+
   /**
    * 全面浏览器兼容检测（pdf.js 3.11 + 库所需全部现代 API）。
    * 返回 { ok, missing[] } —— missing 列出缺的能力，便于提示。
@@ -3179,13 +3208,14 @@
     catch (e) { return false; }
   }
 
-  /** 兼容旧浏览器：structuredClone（Chrome98+/FF94+/Safari15.4+），pdf.js 导出图片等用到 */
+  /** 兼容旧浏览器：structuredClone（Chrome98+/FF94+/Safari15.4+），pdf.js 导出图片/消息传递等用到 */
   function ensureStructuredClonePolyfill() {
     if (typeof structuredClone === 'undefined' && typeof self !== 'undefined') {
-      self.structuredClone = function (obj) {
-        // 降级：JSON 序列化（适用于可序列化对象；pdf.js 用于 ImageBitmap 等场景的降级）
-        return JSON.parse(JSON.stringify(obj));
-      };
+      // ★ 不能 JSON 降级：pdf.js 用 structuredClone 做 postMessage 前的显式 clone，数据常含 TypedArray/循环引用，
+      //   JSON 序列化会丢二进制、循环引用直接报错。同步返回原对象是安全降级——
+      //   因为紧接着的 postMessage() 会用浏览器【原生】structured clone 算法再克隆一次，数据完整性由原生保证；
+      //   仅 transfer 列表被忽略（退化为复制而非所有权转移，功能不受影响）。
+      self.structuredClone = function (obj) { return obj; };
     }
   }
 

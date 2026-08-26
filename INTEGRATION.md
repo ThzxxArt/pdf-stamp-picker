@@ -551,8 +551,8 @@ await picker.load(file)
 ## 12. 版本与兼容
 
 - 浏览器：Chrome/Edge/Firefox/Safari 近两个大版本（Pointer Events + ResizeObserver，无 RO 自动回退）
-- **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖 `Array.at`（92+）/`structuredClone`（98+）/`String.replaceAll`（85+）等。库**自动兼容**：注入 polyfill + **worker 源码注入**（fetch worker 文件 → 头部拼 polyfill → Blob 创建改造 worker），Edge 90 真能跑 pdf.js；worker 文件不可达时回退 fake worker；`compatCheck` 可配（默认自动兼容，`true` 强制提示升级，`false` 纯兜底）
+- **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖 `Array.at`（92+）/`TypedArray.at`（92+）/`structuredClone`（98+）/`String.replaceAll`（85+）等。库**自动兼容**：注入 polyfill（含 TypedArray.at）+ **worker 源码注入**（fetch worker 文件 → 头部拼 polyfill → Blob 创建改造 worker），Edge 90 真能跑 pdf.js；worker 文件不可达时回退 fake worker。`compatCheck` 可配：**默认 `false` 自动兼容不提示**，`true` 才提示升级并拒绝加载
 - **worker fetch + Blob 加载对所有浏览器生效**（v4.8.24 起）：不仅旧内核，现代浏览器的 `new Worker()` 也会因内网 `nosniff`/错误 MIME 被拒，故 worker 统一 fetch 源码 → Blob URL 绕开 strict MIME checking。**前提：内网 `vendor/` 三文件（pdf.min.js + pdf.worker.min.js + cMaps/）必须 HTTP 200 可达**
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 - 坐标：PDF 原生 pt、原点左下、自动补偿页面旋转——对接任何签章服务前先对齐坐标约定（README 有换算公式）
-- 当前版本 v4.8.x：默认签章模式 · JSON 分组输出/含图导出（`includeImage`）/导入反显（`importJSON` / 弹窗传 `json`）· `document.hash`（SHA-256 文件指纹）· 撤销重做 · 多签署方动态管理 · 章固定大小 + 边界间距（`stampMargin`）· 工具栏按钮可配置（`toolbar`）· 弹窗校验（`requireStamp` / `requireAllUsers`）· 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线 · 旧浏览器检测（`compatCheck` 提示升级）· **内网严格 MIME 自动兜底（pdf.min.js + worker 均 fetch+Blob，v4.8.24）**
+- 当前版本 v4.8.x：默认签章模式 · JSON 分组输出/含图导出（`includeImage`）/导入反显（`importJSON` / 弹窗传 `json`）· `document.hash`（SHA-256 文件指纹）· 撤销重做 · 多签署方动态管理 · 章固定大小 + 边界间距（`stampMargin`）· 工具栏按钮可配置（`toolbar`）· 弹窗校验（`requireStamp` / `requireAllUsers`）· 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线 · **旧浏览器自动兼容（compatCheck 默认 false，polyfill 兜底 Edge 90 可用）** · **内网严格 MIME 自动兜底（pdf.min.js + worker 均 fetch+Blob，v4.8.24）**
