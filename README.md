@@ -563,6 +563,7 @@ pdf-stamp-picker/
 │   ├── vue3-test.html       # Vue 3.4 集成测试页
 │   ├── react-test.html      # React 18 集成测试页
 │   ├── edge90-sim-test.html # Edge 90 兼容回归测试（?strict=1 验证升级提示）
+│   ├── modal-retest.html   # 弹窗反复打开/取消回归测试（验证 worker blob 复用）
 │   ├── test.pdf             # 测试 PDF（3 页，含 /Rotate 90）
 │   ├── eight-page.pdf       # 8 页测试 PDF（换文档验证）
 │   ├── chinese-cid.pdf      # 中文 GBK CID 测试 PDF（验证 cMaps）
@@ -589,6 +590,8 @@ cd pdf-stamp-picker && python3 -m http.server 8899
 主 Demo 展示：容器模式（多用户多签章/三种模式/动态签署方/导入 JSON 回显）/ 纯画布模式 / 弹窗模式（确认校验）/ JSON 分组输出（含 document.hash）/ 工具栏配置。
 
 框架集成测试页（均已实测运行）：`demo/angularjs-test.html`、`demo/vue2-test.html`、`demo/vue3-test.html`、`demo/react-test.html`。
+
+回归测试页：`demo/edge90-sim-test.html`（Edge 90 兼容）、`demo/modal-retest.html`（弹窗反复打开/取消，验证 worker blob 复用不悬空）。
 
 ---
 

@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v4.3.1
+ * PdfStampPicker v4.8.26
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.25';
+  var VERSION = '4.8.26';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -62,6 +62,10 @@
   var HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
   var DEFAULT_USERS = [{ id: 'default', name: '默认', color: '#4285f4' }];
   var STAMP_COLORS = ['#4285f4', '#ea4335', '#34a853', '#f9ab00', '#a142f4', '#12b5cb', '#e8710a', '#5f6368'];
+
+  // ★ worker blob URL 全局缓存（跨实例共享）：worker 源码固定，fetch+Blob 只需做一次；
+  //   blob URL 挂全局而非实例，避免实例 destroy 时 revoke 导致其他/后续实例的 workerSrc 悬空
+  var _sharedWorkerBlob = { srcUrl: null, blobUrl: null };
 
   var CSS = [
     /* ===== 基础 ===== */
@@ -901,11 +905,10 @@
 
   /** 确保 worker 可用：统一 fetch+Blob 加载 worker（绕内网 MIME 严格检查 + 注入 polyfill） */
   PdfStampPicker.prototype._ensureWorker = function (pdfjs) {
-    var self = this;
-    // 优先用 pdf.js 已设置的 workerSrc（loadPdfJsAuto/loadPdfJs 已按探测结果设置），否则推断
-    var workerUrl = (pdfjs && pdfjs.GlobalWorkerOptions && pdfjs.GlobalWorkerOptions.workerSrc)
-      ? pdfjs.GlobalWorkerOptions.workerSrc
-      : this._resolveWorkerUrl();
+    // ★ 始终解析【原始 worker 文件 URL】（不读 pdfjs.GlobalWorkerOptions.workerSrc）——
+    //   因为 workerSrc 可能已被上一次的实例设成 blob URL，且该 blob 可能已被 revoke（悬空）；
+    //   fetch+Blob 包装的目标必须是原始文件 URL，且 _setupCompatWorker 内部有全局缓存兜底
+    var workerUrl = this._resolveWorkerUrl();
     if (!workerUrl) {
       this._forceFakeWorker(pdfjs);
       return Promise.resolve();
@@ -940,6 +943,15 @@
       ensureStructuredClonePolyfill();
       ensureReplaceAllPolyfill();
       var absUrl = new URL(workerFileUrl, window.location.href).href;
+      // ★ 复用全局缓存的 blob（同一 worker 源 URL 只 fetch+Blob 一次），
+      //   避免每次打开弹窗重复 fetch，且避免依赖可能已被 revoke 的旧 workerSrc
+      if (_sharedWorkerBlob.srcUrl === absUrl && _sharedWorkerBlob.blobUrl) {
+        pdfjs.GlobalWorkerOptions.workerSrc = _sharedWorkerBlob.blobUrl;
+        if (pdfjs.PDFWorker && pdfjs.PDFWorker._workerPorts) {
+          pdfjs.PDFWorker._workerPorts.clear && pdfjs.PDFWorker._workerPorts.clear();
+        }
+        return Promise.resolve();
+      }
       // ★ fetch worker 源码 → Blob URL：
       //   ① 绕开内网服务器 nosniff/错误 MIME 的 strict MIME checking（new Worker 会被拒）
       //   ② 头部注入 polyfill（Edge90 等旧内核需要，现代浏览器无害）
@@ -964,6 +976,9 @@
         var workerUrl = URL.createObjectURL(blob);
         pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
         self._compatWorkerUrl = workerUrl;
+        // ★ 写入全局缓存（跨实例复用；不再随实例 destroy 而 revoke）
+        _sharedWorkerBlob.srcUrl = absUrl;
+        _sharedWorkerBlob.blobUrl = workerUrl;
         // 清掉已创建的 worker 缓存，下次用新 worker
         if (pdfjs.PDFWorker && pdfjs.PDFWorker._workerPorts) {
           pdfjs.PDFWorker._workerPorts.clear && pdfjs.PDFWorker._workerPorts.clear();
@@ -2949,11 +2964,9 @@
     this._pinch = null;
     if (this._pinchRaf) cancelAnimationFrame(this._pinchRaf);
     this._pinchRaf = 0;
-    // 释放兼容 worker 的 blob URL
-    if (this._compatWorkerUrl && typeof URL !== 'undefined') {
-      try { URL.revokeObjectURL(this._compatWorkerUrl); } catch (e) { /* ignore */ }
-      this._compatWorkerUrl = null;
-    }
+    // 释放兼容 worker 的 blob URL —— 不再 revoke：worker blob 已全局共享（_sharedWorkerBlob），
+    // 跨实例复用，若随实例 destroy 而 revoke 会导致 pdfjs.GlobalWorkerOptions.workerSrc 悬空、后续实例加载失败
+    this._compatWorkerUrl = null;
     // 释放缓存引用（实例被外部持有时也能被 GC 回收）
     this._imgCache = null;
     this._pdfBytes = null;

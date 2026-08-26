@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>弹框重复打开回归测试</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 20px; background: #f5f5f5; }
+button { padding: 10px 20px; font-size: 14px; margin: 4px; cursor: pointer; }
+#log { font-family: monospace; font-size: 12px; white-space: pre-wrap; background: #111; color: #0f0; padding: 12px; border-radius: 6px; margin-top: 12px; min-height: 200px; }
+</style>
+</head>
+<body>
+<h2>弹框模式：打开 → 取消 → 再打开（验证 worker blob 不被 revoke）</h2>
+<button id="btn-open">打开弹框</button>
+<button id="btn-cancel">自动取消</button>
+<pre id="log"></pre>
+
+<script>
+window.__log = function (m) { document.getElementById('log').textContent += m + '\n'; };
+window.__modalResolve = null;   // 用于手动取消当前弹框
+
+// 记录 fetch 次数（patch 原生 fetch，观察 worker 是否重复 fetch）
+window.__workerFetchCount = 0;
+var __origFetch = window.fetch;
+window.fetch = function (input, init) {
+  var url = String(input);
+  if (/pdf\.worker/i.test(url)) {
+    window.__workerFetchCount++;
+    window.__log('  [fetch] worker 第 ' + window.__workerFetchCount + ' 次：' + url.slice(0, 80));
+  }
+  return __origFetch.apply(this, arguments);
+};
+
+function openModalOnce(label) {
+  window.__log('\n=== ' + label + ' 开始 ===');
+  window.__log('当前 workerSrc = ' + (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions
+    ? window.pdfjsLib.GlobalWorkerOptions.workerSrc.slice(0, 60) : '（pdfjs 未加载）'));
+  window.__log('worker fetch 累计 = ' + window.__workerFetchCount);
+
+  var p = PdfStampPicker.openModal({
+    source: { url: 'test.pdf', headers: { 'X-Demo': 'modal-retest' } },
+    title: '选择签章位置（' + label + '）',
+    users: [{ id: 'a', name: '甲方' }, { id: 'b', name: '乙方' }],
+    currentUser: 'a',
+    confirmText: '确认签章点',
+    requireAllUsers: false,
+    pickerOptions: { controls: true, zoom: 'fit-width', mode: 'stamp', toolbar: { url: false, open: false, copyJson: false } }
+  });
+
+  // 3.5 秒后自动取消（模拟用户点取消）
+  setTimeout(function () {
+    var closeBtn = document.querySelector('.psp-modal-close');
+    if (closeBtn) { closeBtn.click(); window.__log('  [操作] 已点取消关闭弹框'); }
+  }, 3500);
+
+  return p.then(function (json) {
+    window.__log(label + ' 结束：' + (json ? ('确认 ' + json.users.length + ' 个用户') : '已取消'));
+  });
+}
+</script>
+
+<script src="../pdf-stamp-picker.js"></script>
+<script>
+window.__log('库已加载，version = ' + (PdfStampPicker && PdfStampPicker.version));
+
+document.getElementById('btn-open').addEventListener('click', function () {
+  openModalOnce('第 1 次打开');
+  setTimeout(function () { openModalOnce('第 2 次打开'); }, 5000);
+  setTimeout(function () { openModalOnce('第 3 次打开'); }, 10500);
+});
+
+document.getElementById('btn-cancel').addEventListener('click', function () {
+  var closeBtn = document.querySelector('.psp-modal-close');
+  if (closeBtn) closeBtn.click(); else window.__log('当前无弹框');
+});
+
+// 自动跑一轮
+window.__log('自动开始连续 3 次打开/取消…');
+openModalOnce('第 1 次打开');
+setTimeout(function () { openModalOnce('第 2 次打开'); }, 5000);
+setTimeout(function () { openModalOnce('第 3 次打开'); }, 10500);
+setTimeout(function () {
+  window.__log('\n===== 结果汇总 =====');
+  window.__log('worker fetch 总次数 = ' + window.__workerFetchCount + '（理想值：1，复用缓存则始终为 1）');
+  window.__log('弹框 DOM 残留 = ' + (document.querySelector('.psp-modal-mask') ? '有 ❌' : '无 ✅'));
+  document.title = window.__workerFetchCount <= 1 ? 'PASS' : 'FAIL';
+}, 15000);
+</script>
+</body>
+</html>
