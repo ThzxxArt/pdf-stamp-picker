@@ -1192,7 +1192,9 @@
         self._emit('pagechange', self._pageInfo());
       });
     }).catch(function (err) {
-      if (token === this._pageToken) self._setLoading(false);
+      // ★ 用 self 而非 this：严格模式下普通函数回调 this 为 undefined，导致
+      //   'Cannot read property _pageToken of undefined'，且覆盖真正的加载失败原因
+      if (token === self._pageToken) self._setLoading(false);
       throw err;
     });
   };
