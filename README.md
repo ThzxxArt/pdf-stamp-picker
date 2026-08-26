@@ -230,6 +230,8 @@ worker 自动按 `pdf.min.js → pdf.worker.min.js` 规则推断。
 - `pdf.worker.min.js`：统一 fetch 源码 → 注入 polyfill → Blob URL 创建 worker（**对所有浏览器生效**）
 
 > 因此内网只需保证 `vendor/` 三件套 **HTTP 200 可达**，无需纠结服务器 MIME 配置。
+>
+> **worker Blob 全局复用（v4.8.26 起）**：worker 源码固定，fetch+Blob 包装结果**跨实例全局缓存**（`_sharedWorkerBlob`）。多次打开/关闭弹窗（`openModal` → 取消/确认 → 再打开）不会重复 fetch，也不会因实例 `destroy()` 吊销 blob URL 导致后续实例的 `workerSrc` 悬空。**连续打开多个弹窗/反复开关弹窗均能正常加载 PDF**。
 
 ### 中文 PDF 离线不乱码（CMap）
 
@@ -469,7 +471,7 @@ new PdfStampPicker('#stage', { toolbar: false });
 | **加载** | `load(source, {pageNumber, mode, signal})` | 统一入口：5 种 source；支持加载后切模式、AbortSignal 中止 |
 | | `loadPDF(source, opts)` | 兼容旧名（同 `load`） |
 | | `setPage(meta)` | 纯画布模式：`{canvas, width, height, rotation, pageNumber, totalPages, name}` |
-| | `gotoPage(n)` | 翻页（Promise），自动补偿旋转 |
+| | `gotoPage(n)` | 翻页（Promise），自动补偿旋转；错误正确传播（不掩盖真实失败原因） |
 | **缩放** | `setZoom(z)` / `getZoom()` | 数字 / `'fit-width'` / `'fit-page'`；获取当前缩放 |
 | | `fitWidth()` / `fitPage()` | 快捷适应 |
 | **模式** | `setMode('point'\|'rect'\|'stamp')` | 切换选择模式 |
