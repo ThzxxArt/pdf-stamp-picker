@@ -481,7 +481,7 @@ picker.addStamp({ x: 300, y: 200, page: 2, userId: 'u2', note: '骑缝章' });
 ## 浏览器兼容
 
 - **现代浏览器**：Chrome/Edge/Firefox/Safari 近两个大版本（Pointer Events + ResizeObserver，无 RO 自动回退）
-- **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖多项现代 API（`Array.at` 92+、`TypedArray.at` 92+、`structuredClone` 98+、`String.replaceAll` 85+、可选链等）。库**自动兼容**：注入 polyfill（含 TypedArray.at）+ **worker 源码注入**（fetch worker 文件 → 头部拼 polyfill → Blob 创建改造 worker），Edge 90 真能跑 pdf.js；worker 文件不可达时回退 fake worker。`compatCheck` 可配：**默认 `false` 自动兼容不提示**，`true` 才提示升级并拒绝加载
+- **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖多项现代 API（`Array.at` 92+、`TypedArray.at` 92+、`structuredClone` 98+、`String.replaceAll` 85+、可选链等）。库**自动兼容**：注入 polyfill（含 TypedArray.at）+ **worker 源码注入**（fetch worker 文件 → 头部拼 polyfill → Blob 创建改造 worker），Edge 90 真能跑 pdf.js；worker 文件不可达时回退 fake worker。`compatCheck` 可配：**默认 `false` 自动兼容不提示**，`true` 才提示升级并拒绝加载。回归验证见 `demo/edge90-sim-test.html`（模拟删除原生 API 后默认正常渲染；`?strict=1` 验证升级提示）
 - **worker fetch + Blob 加载对所有浏览器生效**（v4.8.24 起）：不仅旧内核，现代浏览器的 `new Worker()` 也会因内网 `nosniff`/错误 MIME 被拒，故 worker 统一走 fetch 源码 → Blob URL，天然绕开 strict MIME checking
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 
@@ -505,6 +505,7 @@ Demo 展示：容器模式（多用户多签章/三种模式/动态签署方/导
 #   demo/vue2-test.html         Vue 2.7
 #   demo/vue3-test.html         Vue 3.4
 #   demo/react-test.html        React 18
+#   demo/edge90-sim-test.html   Edge 90 兼容回归测试（模拟删除原生 API；?strict=1 验证升级提示）
 ```
 
 > 完整教程见 [INTEGRATION.md](INTEGRATION.md)（每种框架含完整组件代码、生命周期处理、弹窗用法、常见坑）。
@@ -525,6 +526,7 @@ pdf-stamp-picker/
 │   ├── vue2-test.html       # Vue 2.7 集成测试页
 │   ├── vue3-test.html       # Vue 3.4 集成测试页
 │   ├── react-test.html      # React 18 集成测试页
+│   ├── edge90-sim-test.html # Edge 90 兼容回归测试（模拟删原生 API；?strict=1 验证升级提示）
 │   ├── test.pdf             # 测试 PDF（3 页，含 /Rotate 90）
 │   ├── eight-page.pdf       # 8 页测试 PDF（换文档验证）
 │   ├── chinese-cid.pdf      # 中文 GBK CID 测试 PDF（验证 cMaps）
