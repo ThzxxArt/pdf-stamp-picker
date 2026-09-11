@@ -14,7 +14,7 @@ body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
 <p class="info" id="env"></p>
 <div id="log"></div>
 <div id="stage" style="position:absolute;left:-9999px;width:400px;height:600px"></div>
-<script src="../pdf-stamp-picker.js?v=4.8.27"></script>
+<script src="../pdf-stamp-picker.js?v=4.8.28"></script>
 <script>
 var EXPECT = 'fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac';
 var log = document.getElementById('log');
@@ -79,6 +79,23 @@ async function t4_plain_url_default() {
     'document.hash=' + (j.document.hash || '字段不存在') + '（符合设计：不额外下载；需要就开 hashUrl:true）');
 }
 
+async function t5_nonsecure_bigfile_transfer_race() {
+  // 回归 v4.8.28 修复：pdf.js 会把 ArrayBuffer transfer 给 worker（主线程侧 detached），
+  // 而纯 JS SHA-256 兜底是分块异步读取的 —— 若不等哈希算完就 _getDoc，后续分块读到全 0，
+  // 会静默产出【错误但格式正常】的哈希。20MB 文件可稳定复现（≤3.2MB 时靠时序侥幸通过）。
+  var BIG_EXPECT = '1d9778fb38aae8aa72d83a2a98f24f53cb6ea0cfd474824f8011df41cad9cb13';
+  var exists = await fetch('huge.pdf', { method: 'HEAD', cache: 'no-store' }).then(function (r) { return r.ok; }).catch(function () { return false; });
+  if (!exists) {
+    say('⏭ ⑤ 大文件 transfer 竞态 — 跳过（缺 huge.pdf：python3 test/gen_big_pdf.py demo/huge.pdf 8 2500000）', 'info');
+    return;
+  }
+  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  await p.load({ url: 'huge.pdf', headers: { 'X-Test': '1' } });
+  var h = await p.getHash();
+  record('⑤ 内网HTTP + 20MB 大文件（transfer 竞态回归）', h === BIG_EXPECT,
+    'hash=' + (h ? h.slice(0, 20) + '…' : 'NULL') + ' | 期望=' + BIG_EXPECT.slice(0, 20) + '…');
+}
+
 (async function () {
   document.getElementById('env').textContent =
     '库版本=' + PdfStampPicker.version + ' · isSecureContext=' + window.isSecureContext +
@@ -88,6 +105,7 @@ async function t4_plain_url_default() {
     await t2_nonsecure_with_headers();
     await t3_nonsecure_plain_url_hashUrl();
     await t4_plain_url_default();
+    await t5_nonsecure_bigfile_transfer_race();
   } catch (e) {
     say('❌ 异常：' + e.message, 'bad');
     results.push(false);

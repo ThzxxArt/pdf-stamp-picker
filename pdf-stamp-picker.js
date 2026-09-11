@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v4.8.27
+ * PdfStampPicker v4.8.28
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.27';
+  var VERSION = '4.8.28';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -817,7 +817,13 @@
       // 缓存字节并计算哈希（静态 URL 走 pdf.js 流式时无字节缓存，哈希为 null）
       self._pdfBytes = buf;
       self._pdfHashPromise = sha256(buf);
-      return self._getDoc({ data: buf });
+      // ★ 必须先等哈希算完再交给 pdf.js：pdf.js 会把 ArrayBuffer 以 transfer 方式
+      //   交给 worker，主线程侧这块 buffer 随即变成 detached（byteLength → 0）。
+      //   而纯 JS SHA-256 兜底是【分块 + setTimeout 让出主线程】异步读取的，
+      //   内网 HTTP（crypto.subtle 不可用）加载较大 PDF 时，若 buffer 在读取完成前
+      //   已被 transfer，后续分块读到的全是 0 → 静默得到一个【错误但看起来正常】的哈希。
+      //   （其它加载路径本就先 await 哈希再 _getDoc，这里补齐一致。）
+      return self._pdfHashPromise.then(function () { return self._getDoc({ data: buf }); });
     }).catch(function (err) {
       if (err && err.name === 'AbortError') {
         throw new Error('[PdfStampPicker] 加载已中止');
