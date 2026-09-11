@@ -529,7 +529,7 @@ await picker.load(file)
 | 内网 pdf.min.js 加载失败但 cmaps 正常 | 服务器对 `.js` 返回错误 MIME 或 `nosniff` → 库已自动 fetch+Blob 兜底（v4.8.23/4.8.24）；确保 `vendor/` 三文件 HTTP 200 可达 |
 | 内网 worker 失败（`new Worker` 报错） | 同上，worker 已统一 fetch+Blob 兜底（v4.8.24 起对所有浏览器生效） |
 | 样式被宿主影响 | 所有类名 `psp-` 前缀 + 样式注入带独立 id，冲突风险极低；`#stage` 容器给宽高即可 |
-| 移动端体验 | 基于 Pointer Events，触摸可用（含双指缩放页面）；建议容器高度 ≥ 500px |
+| 移动端体验 | 基于 Pointer Events，触摸可用（含双指缩放页面）；建议容器高度 ≥ 500px。**容器宽度 < 620px 时库会自动把签章列表移到画布下方**（v4.9.5 起，按容器自身宽度判断而非视口），画布用满容器宽度 —— 嵌在侧栏/弹窗里的窄容器同样生效，无需你自己做响应式适配 |
 | 中文 UI 想改语言 | 库内文案集中在 `_buildToolbar/_buildList/openModal`，可按需替换（下版本将抽离 i18n） |
 | 包体积敏感 | 单文件 ~120KB（gzip ~35KB）+ 可选 pdf.js（~1.4MB 含 cMaps，可走 CDN 不打包） |
 | TypeScript 无提示 | 已内置 `pdf-stamp-picker.d.ts`，`types` 字段自动识别 |
@@ -548,11 +548,147 @@ await picker.load(file)
 - 文档切换/`destroy()` 自动释放 pdf.js 文档资源（防长会话内存累积）
 - 如需在低端设备使用，建议 `zoom: 'fit-width'`（默认）减少像素开销
 
-## 12. 版本与兼容
+## 12. API 参考
+
+> 本章是**完整的对外接口清单**，并由 `test/docs.test.js` 自动校验：库里每个对外方法（原型上名字不以 `_` 开头的方法）都必须出现在下面的表格中 —— 新增方法忘了写文档会直接让测试失败。构造选项与事件的完整默认值见 README。
+
+### 12.1 生命周期与加载
+
+| 方法 | 说明 |
+|---|---|
+| `load(source, opts?)` | 加载文档。`source` 支持：URL 字符串 / `File` / `ArrayBuffer` / `{url, method, headers, body}` 流接口 / pdfjs document proxy。`opts.pageNumber` 指定初始页，`opts.mode` 覆盖模式，`opts.signal` 传入 `AbortSignal` 可中止 |
+| `abort()` | 中止在途加载（请求 + 后续渲染），进行中的 `load()` 以 `AbortError` reject。对**已加载完成**的实例是空操作 |
+| `destroy()` | 销毁实例：解绑事件、清理 DOM、中止在途任务。销毁后所有方法均为空操作 |
+| `loadPDF(source, opts?)` | 兼容 v1：直接传入已取得的 pdfjs document proxy（跳过后端加载流程） |
+| `setPage(meta)` | 纯画布模式（兼容 v1）：宿主自行渲染 canvas，库只负责坐标选择与签章层 |
+| `gotoPage(n)` | 跳转到第 n 页（会 clamp 到 `[1, getTotalPages()]`） |
+
+### 12.2 事件订阅
+
+| 方法 | 说明 |
+|---|---|
+| `on(type, fn)` | 订阅事件，返回 `this`（可链式）。回调签名 `(payload, api)` |
+| `off(type, fn)` | 退订指定回调，返回 `this` |
+
+### 12.3 文档信息
+
+| 方法 | 说明 |
+|---|---|
+| `getHash()` | `Promise<string\|null>` —— 文档 SHA-256 指纹。`hashUrl` 模式下异步补算，可配合 `hashready` 事件 |
+| `getDocName()` | 文档名；**未加载时返回 `''`** |
+| `getTotalPages()` | 总页数；**未加载时返回 `0`**（不是 1 —— "没有文档"与"1 页文档"必须可区分，否则空实例会谎报页数） |
+
+### 12.4 视图与缩放
+
+| 方法 | 说明 |
+|---|---|
+| `setZoom(z)` | 设置缩放：数字（如 `1.2`）或 `'fit-width'` / `'fit-page'` |
+| `getZoom()` | 当前缩放（fit 模式返回解析后的实际倍率） |
+| `fitWidth()` | 等价 `setZoom('fit-width')`：页面宽度适配容器 |
+| `fitPage()` | 等价 `setZoom('fit-page')`：整页适配容器 |
+| `setMode(mode)` | 交互模式：`'stamp'`（点选放置）\| `'rect'`（框选）\| `'point'`（单点锚点） |
+| `setAspectRatio(r)` | 选框宽高比（`rect` 模式），如 `1` 为正方形、`0.707` 为 A4 比例 |
+| `setShowGrid(show)` | 是否显示对齐网格 |
+| `toggleList()` | 折叠 / 展开签章列表面板 |
+
+### 12.5 签署方
+
+| 方法 | 说明 |
+|---|---|
+| `setCurrentUser(id)` | 切换当前签署方（新章归属该方） |
+| `getCurrentUser()` | 当前签署方 id |
+| `addUser(user)` | 动态新增签署方 `{id, name, color?}` |
+| `removeUser(id)` | 移除签署方 |
+
+### 12.6 章图
+
+| 方法 | 说明 |
+|---|---|
+| `setStampImage(src)` | 设置公章图：URL / dataURL / `File` / `HTMLCanvasElement`。返回 `Promise<{src, name, w, h}>` |
+| `getStampImage()` | 当前章图信息（含原始尺寸，用于宽高比） |
+
+### 12.7 坐标与选区
+
+| 方法 | 说明 |
+|---|---|
+| `screenToPdf(cx, cy)` | 容器内屏幕坐标 → PDF pt（已补偿页面旋转与 CropBox 偏移） |
+| `pdfToScreen(x, y)` | PDF pt → 容器内屏幕坐标 |
+| `getSelection()` | 当前活动选区（PDF 坐标矩形）；无选区返回 `null` |
+| `getStamps()` | 全部签章数组 |
+| `getActiveStamp()` | 当前活动签章（无则 `null`） |
+| `getStampsByUser(id)` | 指定签署方名下的签章 |
+
+### 12.8 数据导出与导入
+
+| 方法 | 说明 |
+|---|---|
+| `toJSON(opts?)` | 分组 JSON（`users[].stamps[]`）。`opts.includeImage` 决定是否内嵌章图 |
+| `toFlatJSON(opts?)` | 扁平 JSON（顶层 `stamps[]`），便于直接遍历 |
+| `importJSON(json, opts?)` | 导入 JSON，支持分组 / 扁平 / `users[]` 声明式三种写法；返回 `Promise` |
+| `copyJSON()` | 复制当前 JSON 到剪贴板 |
+
+### 12.9 签章增删与选中
+
+| 方法 | 说明 |
+|---|---|
+| `addStamp(sel)` | 程序化添加签章点，`sel = {x, y, width?, height?, page?, userId?, note?}`，返回新建的 stamp。**尺寸缺省时与画布点击放置完全一致**（`point` 模式为 0×0 锚点，其余模式为 `stampSize` 物理尺寸） |
+| `removeStamp(id)` | 按 id 删除签章 |
+| `removeSelection()` | 删除当前选中的签章 |
+| `selectStamp(id)` | 选中指定签章 |
+| `clear()` | 清空全部签章（入撤销栈） |
+| `clearAll()` | **`clear()` 的别名**，两者完全等价（保留以兼容旧写法） |
+
+### 12.10 撤销 / 重做
+
+| 方法 | 说明 |
+|---|---|
+| `undo()` | 撤销一步 |
+| `redo()` | 重做一步 |
+| `beginHistoryGroup(key)` | 开启交互分组：同 `key` 期间的高频变更**覆盖栈顶**而非新增条目（长按方向键、拖拽改尺寸） |
+| `endHistoryGroup()` | 结束分组；也会由 `keyup` / `pointerup` / `blur` / `destroy` 自动结束 |
+
+### 12.11 导出图片
+
+| 方法 | 说明 |
+|---|---|
+| `exportImage(opts?)` | 导出当前页 PNG。`opts.scale`（默认 2）、`opts.includePdf`（默认 true，是否把 PDF 底图一起合成） |
+
+### 12.12 静态成员
+
+| 成员 | 说明 |
+|---|---|
+| `PdfStampPicker.openModal(config)` | 打开弹窗版选择器 |
+| `PdfStampPicker.loadPdfJs(opts)` | 从指定 URL 加载 pdf.js |
+| `PdfStampPicker.loadPdfJsAuto(opts)` | **本地优先、CDN 兜底**加载 pdf.js（含 fetch + Blob 兜底，绕开内网 strict MIME） |
+| `PdfStampPicker.version` | 版本号字符串（如 `'4.9.5'`） |
+
+### 12.13 事件清单
+
+| 事件 | 触发时机 |
+|---|---|
+| `ready` | 文档加载完成、首屏渲染就绪 |
+| `error` | 加载或渲染失败（payload 含错误对象） |
+| `pagechange` | 当前页变化 |
+| `zoomchange` | 缩放或 fit 结果变化 |
+| `change` | 任何签章数据变更（增删改、导入、清空都会发） |
+| `stampadd` | 新增签章 |
+| `stampremove` | 删除签章 |
+| `stampchange` | 签章属性变更（位置 / 尺寸） |
+| `stampselect` | 签章被选中 |
+| `select` | 选区变化（框选过程中） |
+| `stampimage` | 章图被替换 |
+| `overlap` | 检测到签章重叠（微调时会带 `dedupeKey` 节流） |
+| `clear` | 全部签章被清空 |
+| `hashready` | 文档 SHA-256 异步补算完成 |
+| `import` | `importJSON` 完成（payload 含坏条目计数） |
+
+---
+
+## 13. 版本与兼容
 
 - 浏览器：Chrome/Edge/Firefox/Safari 近两个大版本（Pointer Events + ResizeObserver，无 RO 自动回退）
 - **旧浏览器（Edge 90 / Chrome 97 及更旧）**：pdf.js 3.11 依赖 `Array.at`（92+）/`TypedArray.at`（92+）/`structuredClone`（98+）/`String.replaceAll`（85+）等。库**自动兼容**：注入 polyfill（含 TypedArray.at）+ **worker 源码注入**（fetch worker 文件 → 头部拼 polyfill → Blob 创建改造 worker），Edge 90 真能跑 pdf.js；worker 文件不可达时回退 fake worker。`compatCheck` 可配：**默认 `false` 自动兼容不提示**，`true` 才提示升级并拒绝加载
 - **worker fetch + Blob 加载对所有浏览器生效**（v4.8.24 起）：不仅旧内核，现代浏览器的 `new Worker()` 也会因内网 `nosniff`/错误 MIME 被拒，故 worker 统一 fetch 源码 → Blob URL 绕开 strict MIME checking。**前提：内网 `vendor/` 三文件（pdf.min.js + pdf.worker.min.js + cMaps/）必须 HTTP 200 可达**
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 - 坐标：PDF 原生 pt、原点左下、自动补偿页面旋转——对接任何签章服务前先对齐坐标约定（README 有换算公式）
-- 当前版本 v4.8.x：默认签章模式 · JSON 分组输出/含图导出（`includeImage`）/导入反显（`importJSON` / 弹窗传 `json`）· `document.hash`（SHA-256 文件指纹）· 撤销重做 · 多签署方动态管理 · 章固定大小 + 边界间距（`stampMargin`）· 工具栏按钮可配置（`toolbar`）· 弹窗校验（`requireStamp` / `requireAllUsers`）· 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线 · **旧浏览器自动兼容（compatCheck 默认 false，polyfill 兜底 Edge 90 可用）** · **内网严格 MIME 自动兜底（pdf.min.js + worker 均 fetch+Blob，v4.8.24）**
+- 当前版本 v4.9.5：默认签章模式 · JSON 分组输出/含图导出（`includeImage`）/导入反显（`importJSON` / 弹窗传 `json`）· `document.hash`（SHA-256 文件指纹）· 撤销重做（含**交互分组** `beginHistoryGroup`）· 多签署方动态管理 · 章固定大小 + 边界间距（`stampMargin`）· 工具栏按钮可配置（`toolbar`）· 弹窗校验（`requireStamp` / `requireAllUsers`）· 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线 · **旧浏览器自动兼容（compatCheck 默认 false，polyfill 兜底 Edge 90 可用）** · **内网严格 MIME 自动兜底（pdf.min.js + worker 均 fetch+Blob，v4.8.24）** · **签章尺寸单位为 PDF pt（v4.9.4：`stampSize` 与画布点击放置完全一致，不随窗口宽度/缩放漂移）** · **窄容器自动堆叠（v4.9.5：容器宽度 < 620px 时签章列表移到画布下方，画布不再被 248px 侧栏挤瘪）**

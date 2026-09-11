@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PdfStampPicker v4.9.4 — 电子签章坐标选择器 Demo</title>
+<title>PdfStampPicker v4.9.5 — 电子签章坐标选择器 Demo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif; background: #f0f2f5; color: #202124; height: 100vh; display: flex; flex-direction: column; }
@@ -44,12 +44,33 @@
   #output .dim { color: #9aa0a6; }
   #info { padding: 0 16px 10px; font-size: 11px; color: #1a73e8; }
   .badge { display: inline-block; background: #e8f0fe; color: #4285f4; font-size: 10px; padding: 1px 8px; border-radius: 10px; margin-left: 6px; vertical-align: middle; font-weight: 600; }
+
+  /* ===== 响应式：窄屏由「左右分栏」改为「上下堆叠」（画布在上、侧栏在下）=====
+     修复前：main 恒为横向 flex + aside 固定 330px，412px 视口下画布只剩 40px 宽，
+     PDF 被渲染成 50×71px，整页不可用。 */
+  @media (max-width: 820px) {
+    main { flex-direction: column; padding: 10px; gap: 10px; }
+    #stage { flex: 1 1 auto; min-height: 240px; }
+    aside { width: auto; flex: 0 1 auto; max-height: 48vh; }
+    .json-wrap { min-height: 96px; }
+  }
+  @media (max-width: 520px) {
+    header { padding: 10px 12px; gap: 10px; }
+    header h1 { font-size: 13.5px; }
+    header .tag { display: none; }
+    .tabs { margin-left: 0; width: 100%; }
+    .tabs button { flex: 1; }
+    main { padding: 8px; gap: 8px; }
+    aside { max-height: 52vh; }
+  }
+  /* 移动端浏览器地址栏会吃掉 100vh，支持 dvh 时用动态视口高度兜底 */
+  @supports (height: 100dvh) { body { height: 100dvh; } }
 </style>
 </head>
 <body>
 <header>
   <div class="logo">🖊</div>
-  <h1>PdfStampPicker <span class="tag">单文件 · 零依赖 · 坐标选择器</span><span class="ver" id="ver-tag">v4.9.4</span></h1>
+  <h1>PdfStampPicker <span class="tag">单文件 · 零依赖 · 坐标选择器</span><span class="ver" id="ver-tag">v4.9.5</span></h1>
   <nav class="tabs">
     <button id="tab-container" class="active">容器模式</button>
     <button id="tab-canvas">纯画布</button>
@@ -80,7 +101,7 @@
   </aside>
 </main>
 
-<script src="../pdf-stamp-picker.js?v=4.9.4"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.5"></script>
 <script>
 // pdf.js 由库自动探测加载（与真实项目一致：库自动找同目录 vendor/pdf.min.js）
 

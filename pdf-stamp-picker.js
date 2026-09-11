@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.9.4';
+  var VERSION = '4.9.5';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -186,7 +186,15 @@
     '.psp-loading{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(248,249,250,.75);z-index:6;gap:10px;backdrop-filter:blur(2px)}',
     '.psp-spinner{width:34px;height:34px;border-radius:50%;border:3px solid rgba(66,133,244,.2);border-top-color:#4285f4;animation:pspSpin .8s linear infinite}',
     '.psp-loading-txt{font-size:12px;color:#5f6368}',
-    '@keyframes pspSpin{to{transform:rotate(360deg)}}'
+    '@keyframes pspSpin{to{transform:rotate(360deg)}}',
+    /* ===== 窄容器适配（由 _syncNarrow() 按 .psp-root 自身宽度加 .psp-narrow 类）=====
+       问题：.psp-list 固定 248px 且 flex:none，容器一窄就把画布挤瘪 —— 容器 396px 时
+       画布只剩 148px，fit-width 算出 72px 的页面（实测），页面几乎不可见。
+       这里把左右分栏改为上下堆叠：画布在上、列表在下（限高可滚动）。
+       不用媒体查询：库常被嵌在宽视口里的窄容器中（侧栏/弹窗），按容器宽度判断才准确。 */
+    '.psp-root.psp-narrow .psp-main{flex-direction:column}',
+    '.psp-root.psp-narrow .psp-list{width:auto;flex:0 0 auto;max-height:44%;border-left:none;border-top:1px solid rgba(0,0,0,.1)}',
+    '.psp-root.psp-dark.psp-narrow .psp-list{border-top-color:rgba(128,134,139,.2)}'
   ].join('');
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -401,6 +409,7 @@
     this._pdfMode = null;   // 'pdfjs' | 'canvas'
     this._docName = '';
     this._cssScale = 1;
+    this._isNarrow = false;   // 窄容器形态（见 _syncNarrow）：容器宽度 < 620 时列表改为底部堆叠
     this._displayW = 0; this._displayH = 0;
     this._sel = null;       // 活动选区（屏幕坐标）
     this._drag = null;
@@ -1684,7 +1693,25 @@
     return cw / spanW;
   };
 
+  /* 窄容器形态开关：列表固定 248px + flex:none，容器一窄就把画布挤瘪
+   * （实测 396px 容器下画布只剩 148px → fit-width 把页面算成 72px 宽，几乎不可见）。
+   * 按 .psp-root 自身宽度判断而非视口宽度 —— 库常被嵌在宽视口里的窄容器中（侧栏/弹窗），
+   * 那种情况下媒体查询不会触发，但画布同样已被挤瘪。
+   * 导入的窄容器样式见 CSS 中的 .psp-root.psp-narrow。
+   * 与基线取 620：248(列表) + 320(画布最低可用宽) + 余量。 */
+  PdfStampPicker.prototype._syncNarrow = function () {
+    if (!this._root) return;
+    var w = this._root.clientWidth;
+    var narrow = w > 0 && w < 620;
+    if (narrow === this._isNarrow) return;   // 幂等：只在形态翻转时动 DOM，避免抖动/观察器回声
+    this._isNarrow = narrow;
+    if (narrow) this._root.classList.add('psp-narrow');
+    else this._root.classList.remove('psp-narrow');
+  };
+
   PdfStampPicker.prototype._layoutPage = function () {
+    // ★ 先定形态再读尺寸：flex-direction 会改变可视区宽高，顺序反了就会按旧布局算出错误缩放
+    this._syncNarrow();
     this._cssScale = this._resolveCssScale();
     this._displayW = this._spanW() * this._cssScale;
     this._displayH = this._spanH() * this._cssScale;
@@ -2874,6 +2901,7 @@
 
   PdfStampPicker.prototype._applyResize = function () {
     if (this._destroyed) return;
+    this._syncNarrow();   // 数字 zoom 分支不走 _layoutPage，这里补一次（幂等）
     var z = this._options.zoom;
     if (z === 'fit-width' || z === 'fit-page') {
       this._layoutPage();

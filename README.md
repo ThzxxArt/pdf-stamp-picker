@@ -44,6 +44,7 @@
 
 **体验**
 - ⚡ **一键弹窗**：`openModal()` 免写容器/样式，宽高/模式/校验/含图全可配
+- 📐 **窄容器自适应**：容器窄了自动把签章列表移到画布下方（按容器宽度判断，侧栏/弹窗内同样生效），宿主不必写响应式
 - 🧰 **工具栏可配置**：按钮按需隐藏，容器与弹窗行为一致
 - ↩️ **撤销/重做**（步数可配 `historyLimit`，默认 50）+ 序号角标 + 重叠警告 + 备注编辑 + 方向键微调
 
@@ -125,6 +126,15 @@ const picker = new PdfStampPicker('#stage', {
 });
 await picker.load('contract.pdf');
 ```
+
+**容器多窄都行（v4.9.5 起库内自动适配）**：库按**容器自身宽度**（不是视口宽度）自动切换形态——容器宽度 < 620px 时，右侧签章列表（固定 248px）改为**移到画布下方**（限高可滚动），画布用满整个容器宽度；容器变宽后自动恢复左右分栏。宿主**不需要写任何响应式 CSS**。
+
+```js
+// 侧栏 / 弹窗 / 分栏面板里的 360px 容器：库自动堆叠，画布不被挤瘪
+new PdfStampPicker('#side-panel', { /* ... */ });
+```
+
+> **为什么用容器宽度而不是媒体查询**：库常被嵌在"宽视口 + 窄容器"的场景里（右侧栏、抽屉、分栏面板）。这类情况视口不窄、媒体查询不触发，但画布同样被 248px 列表挤瘪——实测容器 396px 时画布只剩 148px，`fit-width` 把 A4 页算成 72px 宽，页面几乎不可见。
 
 ### 2. 弹窗模式（一键，最省事）
 
@@ -637,24 +647,33 @@ cd pdf-stamp-picker && python3 -m http.server 8899
 
 主 Demo 展示：容器模式（多用户多签章/三种模式/动态签署方/导入 JSON 回显）/ 纯画布模式 / 弹窗模式（确认校验）/ JSON 分组输出（含 document.hash）/ 工具栏配置。
 
-**一键全量浏览器回归**：`demo/run-all.html` 用 iframe 顺序跑下面所有页面（`edge90-sim-test.html` 跑默认与 `?strict=1` 两遍 → 共 7 个套件），输出 `7 个套件 · 109/109 条断言 · 25.5s` 这样的单一结论（任一页失败即汇总为 FAIL）。各页共用 `demo/test-harness.js`：`__TEST.start/expect/record/finish` + `__TEST.summary()`，结果挂在 `window.__RESULT__`；页面脚本抛错会被 harness 记为「未处理的 Promise 拒绝」——所以 `expect()` 的条数必须与 `record()` 实际条数一致，否则会被判成漏跑/多报。
+**一键全量浏览器回归**：`demo/run-all.html` 用 iframe 顺序跑下面所有页面（`edge90-sim-test.html` 跑默认与 `?strict=1` 两遍 → 共 11 个套件），输出 `11 个套件 · 190/190 条断言 · 55.4s` 这样的单一结论（任一页失败即汇总为 FAIL）。各页共用 `demo/test-harness.js`：`__TEST.start/expect/record/finish` + `__TEST.summary()`，结果挂在 `window.__RESULT__`；页面脚本抛错会被 harness 记为「未处理的 Promise 拒绝」——所以 `expect()` 的条数必须与 `record()` 实际条数一致，否则会被判成漏跑/多报。
+
+> 本节的**套件清单与条数由 `test/docs.test.js` 自动校验**（与 `run-all.html` 的 `SUITE`、各页 `__TEST.expect()` 对账）——避免"加了套件忘了写文档 / 条数写错"这类滞后。
 
 | 页面 | 覆盖 |
 |---|---|
-| `h1-lifecycle-test.html` | 加载生命周期：并发 load 串档、`abort()` 语义、失败上报 stage（16 条） |
+| `h1-lifecycle-test.html` | 加载生命周期：并发 load 串档、`abort()` 语义、失败上报 stage（17 条） |
 | `hash-nonsecure-test.html` | 哈希：安全上下文 / 内网 HTTP 纯 JS 兜底 / 纯 URL `hashUrl` 补算 / 20MB transfer 竞态（5 条） |
-| `edge90-sim-test.html` | Edge 90 兼容：默认自动兼容不提示；`?strict=1` 验证升级提示（各 6 条） |
+| `edge90-sim-test.html` | Edge 90 兼容：默认自动兼容不提示；`?strict=1` 验证升级提示（各 6 条，跑两遍） |
 | `modal-retest.html` | 弹窗反复打开/取消，worker blob 复用不悬空 + 真实渲染（4 条） |
 | `coords-vs-pdfjs-test.html` | 坐标换算 vs pdf.js 权威实现（纯换算、无 DOM，4 旋转，失败时报出最差点，8 条） |
 | `rot-coords-e2e-test.html` | **真实 `load()` 路径**：8 种页面（旋转 0/90/180/270 × CropBox 原点 0 / 非零）+ 真实指针点击 → 落点 vs pdf.js，并回画校验（64 条） |
+| `history-nudge-test.html` | 撤销历史粒度：一次"按住"= 一步、同 key 合并、不冲爆栈、undo/redo 后合并上下文失效（21 条） |
+| `addstamp-size-test.html` | `addStamp()` 缺省尺寸语义：0×0 空章陷阱、缺省 = `stampSize`（pdf pt）、随比例、选区同步（20 条） |
+| `docmeta-test.html` | 文档元信息：未加载归 0/空串（≠1 页）、取消/失败/换档归零、三出口同源（25 条） |
+| `narrow-layout-test.html` | 窄容器布局：按**容器**宽度堆叠（非视口）、画布不被 248px 列表挤瘪、阈值上下侧、形态可逆（14 条） |
 
 框架集成测试页（均已实测运行）：`demo/angularjs-test.html`、`demo/vue2-test.html`、`demo/vue3-test.html`、`demo/react-test.html`。
 
-Node 侧（无浏览器）：
+Node 侧（无浏览器，一键：`sh test/run-node.sh`）：
 ```bash
-node test/coords.test.js   # 123 项：4 旋转 × 4 缩放往返 + 偏移 + 退化 + 绝对方向快照 + 单一真源守卫
-node test/json.test.js     # JSON 结构 / 按用户分组 / 旋转归一化 / 导入解析
-node test/docs.test.js     # 文档一致性：版本号、缓存戳、构造选项 ↔ README ↔ d.ts、事件、公开方法
+node test/coords.test.js     # 123 项：4 旋转 × 4 缩放往返 + 偏移 + 退化 + 绝对方向快照 + 单一真源守卫
+node test/json.test.js       # JSON 结构 / 按用户分组 / 旋转归一化 / 导入解析
+node test/docs.test.js       # 文档一致性：版本号（库/包/缓存戳/页内显示）、README ↔ d.ts ↔ 源码、INTEGRATION.md 第 12 章、本节套件清单
+node test/history.test.js    # 25 项：交互分组语义（一次按住=一步 / 不冲爆栈 / 跨 key 不合并 / 重置清理）
+node test/addstamp.test.js   # 15 组：addStamp 缺省尺寸、point 模式 0×0、显示尺寸 = 物理 × cssScale、选区同步
+node test/docmeta.test.js    # 10 组：getDocName/getTotalPages 的三出口同源与归零语义
 python3 test/gen_rotated_pdf.py   # 重新生成 demo/rot*.pdf 与 crop-rot*.pdf（手工 PDF 字节，零依赖）
 ```
 

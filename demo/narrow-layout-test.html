@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>窄容器布局回归测试（画布不被侧栏挤瘪）</title>
+<style>
+body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
+#log div{padding:2px 0}
+.ok{color:#4ade80}.bad{color:#f87171}.info{color:#93c5fd}.sec{margin-top:8px;font-weight:700;color:#93c5fd}
+/* 被测容器由脚本控制宽度；移到屏外，避免它自己的宽度反过来影响页面视口 */
+#stage{position:absolute;left:-9999px;top:0}
+</style>
+</head>
+<body>
+<h2>PdfStampPicker 窄容器布局回归测试</h2>
+<p class="info" id="ver"></p>
+<div id="log"></div>
+<div id="stage"></div>
+<script src="../pdf-stamp-picker.js?v=4.9.5"></script>
+<script src="test-harness.js?v=4.9.5"></script>
+<script>
+/* ============================================================================
+ * 被验证的行为：容器变窄时，右侧签章列表（.psp-list，固定 248px + flex:none）
+ * 会与画布争抢宽度，把画布挤瘪 —— 容器 396px 时画布只剩 148px，
+ * fit-width 据此把页面算成 72px 宽（实测），页面几乎不可见。
+ *
+ * 修复：按 .psp-root 自身宽度 < 620 时切到"画布在上、列表在下"的堆叠形态
+ * （class 由 _syncNarrow 维护，样式见 CSS 中的 .psp-root.psp-narrow）。
+ *
+ * ★ 本页最值钱的一条：**④ 证明判据是容器宽度而非视口宽度**。
+ *   本页跑在聚合器的 1000px iframe 里（视口很宽），若实现改用
+ *   `@media (max-width:640px)` 这类视口判据，④ 会立刻报红 ——
+ *   而库恰恰常被嵌在"宽视口 + 窄容器"的场景里（侧栏、弹窗、分栏面板），
+ *   那种情况下画布同样被挤瘪，媒体查询却不会触发。
+ *
+ * 期望值全部来自**独立于实现的几何关系**（容器宽 - 留白 76px），
+ * 不是从库内部读数复制出来的 —— 否则就是 f()===f() 的同义反复。
+ * ========================================================================== */
+(function () {
+  var log = document.getElementById('log');
+  function say(msg, cls) {
+    var d = document.createElement('div');
+    d.className = cls || '';
+    d.textContent = msg;
+    log.appendChild(d);
+  }
+  function rec(name, pass, detail) { __TEST.record(name, pass, detail); say((pass ? '✅ ' : '❌ ') + name + ' — ' + detail, pass ? 'ok' : 'bad'); }
+  function section(t) { say('■ ' + t, 'sec'); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function raf2() { return new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); }); }
+
+  var PAD_X = 76;   // 库内 _resolveCssScale 的水平留白（28*2 + 滚动条 + 余量）
+  var LIST_W = 248; // 库内 .psp-list 的固定宽度（仅用于"宽容器"一侧的期望值）
+  var NARROW_MAX = 620;  // 窄容器阈值（_syncNarrow）
+
+  var host = null, pk = null;
+
+  function mkHost(w, h) {
+    var el = document.createElement('div');
+    el.style.cssText = 'width:' + w + 'px;height:' + h + 'px';
+    document.getElementById('stage').appendChild(el);
+    return el;
+  }
+
+  /* 读取"用户可见的几何结果"，而不是库的内部字段 */
+  function geom() {
+    var root = host.querySelector('.psp-root');
+    var main = root.querySelector('.psp-main');
+    var pg = root.querySelector('.psp-page');
+    var sc = root.querySelector('.psp-scroll');
+    var ls = root.querySelector('.psp-list');
+    return {
+      rootW: root.clientWidth,
+      narrow: root.classList.contains('psp-narrow'),
+      dir: getComputedStyle(main).flexDirection,
+      pageW: Math.round(pg.getBoundingClientRect().width),
+      scrollW: sc.clientWidth,
+      listW: ls ? Math.round(ls.getBoundingClientRect().width) : -1
+    };
+  }
+
+  /* 改容器宽度 → 等 ResizeObserver(内部 rAF 防抖) 落定 */
+  async function resizeTo(w) {
+    host.style.width = w + 'px';
+    await raf2();
+    await sleep(120);
+    await raf2();
+    return geom();
+  }
+
+  function near(a, b, tol) { return Math.abs(a - b) <= (tol == null ? 3 : tol); }
+
+  (async function () {
+    __TEST.start('窄容器布局（画布不被侧栏挤瘪）');
+    __TEST.expect(14);   // ⑥2 + ①4 + ②3 + ③2 + ④1 + ⑤2（写死条数：漏跑即 FAIL）
+    document.getElementById('ver').textContent = '库版本 ' + PdfStampPicker.version;
+
+    /* ---------- ⑥ 首屏（尚未加载文档）就该是正确的形态 ---------- */
+    section('⑥ 未加载文档时形态即正确（首屏不该先闪一下挤瘪的画布）');
+    host = mkHost(380, 600);
+    pk = new PdfStampPicker(host, { mode: 'stamp', controls: true, showList: true, zoom: 'fit-width' });
+    await raf2();
+    await sleep(150);
+    var g0 = geom();
+    rec('⑥-1 窄容器构造后即带 psp-narrow 类', g0.narrow === true,
+      '容器=' + g0.rootW + 'px(<' + NARROW_MAX + ') narrow=' + g0.narrow);
+    rec('⑥-2 未加载文档时 main 已是纵向堆叠', g0.dir === 'column', 'flex-direction=' + g0.dir);
+
+    /* ---------- 准备真实文档（画布尺寸要对账就得真渲染） ---------- */
+    await pk.load('test.pdf');
+    await raf2();
+    await sleep(150);
+
+    /* ---------- ① 窄容器：画布用满容器宽度 ---------- */
+    section('① 窄容器（380px）：画布用满宽度，列表让位到下方');
+    var g1 = await resizeTo(380);
+    rec('①-1 形态为堆叠（psp-narrow + column）', g1.narrow && g1.dir === 'column',
+      'narrow=' + g1.narrow + ' dir=' + g1.dir);
+    rec('①-2 画布宽度 = 容器宽 - 留白（不再被 248px 列表挤瘪）', near(g1.pageW, 380 - PAD_X),
+      'pageW=' + g1.pageW + ' 期望≈' + (380 - PAD_X) + '（修复前实测 72）');
+    rec('①-3 列表不再占侧边，而是撑满容器宽', g1.listW > 300,
+      'listW=' + g1.listW + '（横排时应为 ' + LIST_W + '）');
+    rec('①-4 滚动区宽度也回到容器宽（非 148px 那种被挤压值）', g1.scrollW > 300,
+      'scrollW=' + g1.scrollW);
+
+    /* ---------- ② 宽容器：恢复左右分栏，且画布尺寸与改造前一致 ---------- */
+    section('② 宽容器（900px）：恢复左右分栏（桌面零回归）');
+    var g2 = await resizeTo(900);
+    rec('②-1 形态回到横排（无 psp-narrow）', !g2.narrow && g2.dir === 'row',
+      'narrow=' + g2.narrow + ' dir=' + g2.dir);
+    rec('②-2 列表回到右侧、宽约 ' + LIST_W + 'px', near(g2.listW, LIST_W, 2),
+      'listW=' + g2.listW + ' 期望≈' + LIST_W + '（±2 容边框/取整）');
+    rec('②-3 画布宽度 = 容器宽 - 列表 - 留白', near(g2.pageW, 900 - LIST_W - PAD_X),
+      'pageW=' + g2.pageW + ' 期望≈' + (900 - LIST_W - PAD_X));
+
+    /* ---------- ③ 可逆：宽 → 窄必须能切回来 ---------- */
+    section('③ 可逆性（拖动窗口来回变宽变窄）');
+    var g3 = await resizeTo(380);
+    rec('③-1 由宽变窄能再次堆叠', g3.narrow && g3.dir === 'column',
+      'narrow=' + g3.narrow + ' dir=' + g3.dir);
+    rec('③-2 画布宽度重新用满容器', near(g3.pageW, 380 - PAD_X), 'pageW=' + g3.pageW);
+
+    /* ---------- ④ 判据必须是容器宽度，不是视口宽度（本页最值钱的一条） ---------- */
+    section('④ 判据 = 容器宽度 ≠ 视口宽度（媒体查询方案会在这里失效）');
+    var g4 = geom();
+    rec('④-1 视口不窄但容器窄时，仍必须堆叠',
+      window.innerWidth > NARROW_MAX && g4.rootW < NARROW_MAX && g4.narrow === true,
+      '视口=' + window.innerWidth + 'px(>' + NARROW_MAX + ') 容器=' + g4.rootW + 'px(<' + NARROW_MAX + ') narrow=' + g4.narrow);
+
+    /* ---------- ⑤ 阈值两侧边界 ---------- */
+    section('⑤ 阈值边界（' + NARROW_MAX + 'px）');
+    var gA = await resizeTo(NARROW_MAX - 20);   // 600 → 堆叠
+    rec('⑤-1 阈值下侧（' + (NARROW_MAX - 20) + 'px）堆叠', gA.narrow === true, 'narrow=' + gA.narrow);
+    var gB = await resizeTo(NARROW_MAX + 40);   // 660 → 横排
+    rec('⑤-2 阈值上侧（' + (NARROW_MAX + 40) + 'px）横排', gB.narrow === false, 'narrow=' + gB.narrow);
+
+    __TEST.finish();
+  })().catch(function (e) {
+    say('未捕获异常：' + (e && e.stack || e), 'bad');
+    __TEST.record('页面级异常', false, String(e && e.message || e));
+    __TEST.finish();
+  });
+})();
+</script>
+</body>
+</html>

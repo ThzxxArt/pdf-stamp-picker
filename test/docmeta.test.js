@@ -140,14 +140,24 @@ function mkInst(seed) {
 /* 9. getter 是只读纯读取：不改状态、可重复调用 */
 {
   const p = mkInst({ _docName: 'a.pdf', _totalPages: 4 });
-  const before = JSON.stringify(p.toJSON().document);
+  /* ★ generatedAt 是"构建时刻"（每次导出都刷新，设计如此）→ 整体比较 JSON 字符串
+     必然跨毫秒假失败（实测：两次调用差 1ms 就红）。比较前剔除它，
+     再单独断言它确实存在且可解析 —— 否则剔除会把"字段丢了"一起盖住。 */
+  const stableDoc = function () {
+    const d = JSON.parse(JSON.stringify(p.toJSON().document));
+    delete d.generatedAt;
+    return JSON.stringify(d);
+  };
+  const before = stableDoc();
   assert.strictEqual(p.getTotalPages(), 4);
   assert.strictEqual(p.getTotalPages(), 4);
   assert.strictEqual(p.getDocName(), 'a.pdf');
   assert.strictEqual(p.getDocName(), 'a.pdf');
   assert.strictEqual(p._docName, 'a.pdf');
   assert.strictEqual(p._totalPages, 4);
-  assert.strictEqual(JSON.stringify(p.toJSON().document), before);
+  assert.strictEqual(stableDoc(), before);
+  const ga = p.toJSON().document.generatedAt;
+  assert.ok(typeof ga === 'string' && !isNaN(Date.parse(ga)), 'generatedAt 应是可解析的时间戳，实际 ' + ga);
   ok();
 }
 
