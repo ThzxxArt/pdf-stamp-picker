@@ -125,9 +125,9 @@ styleEl.textContent = '@keyframes fadeUp{from{opacity:0;transform:translateX(-50
 document.head.appendChild(styleEl);
 
 const USERS = [
-  { id: 'u1', name: '甲方', color: '#4285f4' },
-  { id: 'u2', name: '乙方', color: '#ea4335' },
-  { id: 'u3', name: '丙方', color: '#34a853' }
+  { id: 'u1', name: '杭州云启智能科技有限公司', color: '#4285f4' },
+  { id: 'u2', name: '深圳数联信息技术有限公司', color: '#ea4335' },
+  { id: 'u3', name: '北京中泰融资担保有限公司', color: '#34a853' }
 ];
 
 function renderJSON() {
@@ -217,10 +217,10 @@ document.getElementById('btn-import').addEventListener('click', () => {
   ta.style.cssText = 'width:100%;height:260px;box-sizing:border-box;font:11.5px/1.5 monospace;border:1px solid #e3e6ea;border-radius:8px;padding:10px;resize:vertical;outline:none';
   ta.value = JSON.stringify({
     users: [
-      { user: { id: 'u1', name: '甲方', color: '#4285f4' }, stamps: [
+      { user: { id: 'u1', name: '杭州云启智能科技有限公司', color: '#4285f4' }, stamps: [
         { id: 'demo1', page: 1, x: 120, y: 560, width: 67.9, height: 67.9, unit: 'pt', rotation: 0, note: '示例公章', createdAt: '' }
       ]},
-      { user: { id: 'u2', name: '乙方', color: '#ea4335' }, stamps: [
+      { user: { id: 'u2', name: '深圳数联信息技术有限公司', color: '#ea4335' }, stamps: [
         { id: 'demo2', page: 1, x: 320, y: 480, width: 67.9, height: 67.9, unit: 'pt', rotation: 0, note: '', createdAt: '' }
       ]}
     ]
@@ -316,8 +316,9 @@ function initCanvasMode() {
   ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1; ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
   ctx.fillStyle = '#333'; ctx.font = 'bold 22px serif'; ctx.fillText('购销合同', 40, 100);
   ctx.font = '13px sans-serif'; ctx.fillStyle = '#666';
-  ctx.fillText('甲方：示例科技有限公司', 40, 150);
-  ctx.fillText('乙方：示例贸易有限公司', 40, 180);
+  ctx.fillText('甲方：杭州云启智能科技有限公司', 40, 150);
+  ctx.fillText('乙方：深圳数联信息技术有限公司', 40, 180);
+  ctx.fillText('丙方：北京中泰融资担保有限公司', 40, 210);
   ctx.font = '12px sans-serif'; ctx.fillStyle = '#999';
   for (let i = 0; i < 14; i++) ctx.fillText('……（合同条款正文占位）……', 40, 230 + i * 32);
   ctx.strokeStyle = '#c33'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);

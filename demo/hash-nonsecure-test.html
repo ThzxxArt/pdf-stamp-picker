@@ -48,7 +48,7 @@ function record(name, pass, detail) {
 }
 
 async function t1_secure_with_headers() {
-  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  var p = mk({ users: [{ id: 'a', name: '杭州云启智能科技有限公司' }] });
   await p.load({ url: 'test.pdf', headers: { 'X-Test': '1' } });
   p.on('hashready', function () {});
   var h = await p.getHash();
@@ -58,14 +58,14 @@ async function t1_secure_with_headers() {
 async function t2_nonsecure_with_headers() {
   var hidden = hideSubtle();
   say('已隐藏 crypto.subtle（模拟内网 HTTP）→ subtle=' + (crypto.subtle ? '有' : '无'), 'info');
-  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  var p = mk({ users: [{ id: 'a', name: '杭州云启智能科技有限公司' }] });
   await p.load({ url: 'test.pdf', headers: { 'X-Test': '1' } });
   var h = await p.getHash();
   record('② 内网HTTP + headers（纯JS兜底）', hidden && h === EXPECT, 'hash=' + (h ? h.slice(0, 20) + '…' : 'NULL'));
 }
 
 async function t3_nonsecure_plain_url_hashUrl() {
-  var p = mk({ users: [{ id: 'a', name: '甲方' }], hashUrl: true });
+  var p = mk({ users: [{ id: 'a', name: '杭州云启智能科技有限公司' }], hashUrl: true });
   var eventHash = null;
   p.on('hashready', function (e) { eventHash = e.hash; });
   await p.load('test.pdf');
@@ -74,7 +74,7 @@ async function t3_nonsecure_plain_url_hashUrl() {
 }
 
 async function t4_plain_url_default() {
-  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  var p = mk({ users: [{ id: 'a', name: '杭州云启智能科技有限公司' }] });
   await p.load('test.pdf');
   var j = p.toJSON();
   record('④ 纯URL 默认(hashUrl 未开) → 预期无 hash 字段',
@@ -92,7 +92,7 @@ async function t5_nonsecure_bigfile_transfer_race() {
     say('⏭ ⑤ 大文件 transfer 竞态 — 跳过（缺 huge.pdf：python3 test/gen_big_pdf.py demo/huge.pdf 8 2500000）', 'info');
     return;
   }
-  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  var p = mk({ users: [{ id: 'a', name: '杭州云启智能科技有限公司' }] });
   await p.load({ url: 'huge.pdf', headers: { 'X-Test': '1' } });
   var h = await p.getHash();
   record('⑤ 内网HTTP + 20MB 大文件（transfer 竞态回归）', h === BIG_EXPECT,

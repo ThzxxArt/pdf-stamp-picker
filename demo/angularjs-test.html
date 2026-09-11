@@ -38,8 +38,8 @@ angular.module('pspDemo', []).directive('pdfStampPicker', function () {
   };
 }).controller('DemoCtrl', ['$scope', '$timeout', function ($scope, $timeout) {
   $scope.signers = [
-    { id: 'a1', name: '甲方', color: '#4285f4' },
-    { id: 'b1', name: '乙方', color: '#ea4335' }
+    { id: 'a1', name: '杭州云启智能科技有限公司', color: '#4285f4' },
+    { id: 'b1', name: '深圳数联信息技术有限公司', color: '#ea4335' }
   ];
   $scope.onReady = function (args) {
     $scope.picker = args.picker;

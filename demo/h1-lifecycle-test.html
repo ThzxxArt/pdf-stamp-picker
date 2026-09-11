@@ -86,7 +86,7 @@ function installDelayMock() {
 
 /* ① D3：并发 load —— 慢 A 被快 B 取代，状态必须是 B 的 */
 async function t1_concurrent() {
-  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  var p = mk({ users: [{ id: 'a', name: '杭州云启智能科技有限公司' }] });
   window.__delayOnce = 600;
   var pA = p.load('test.pdf');                  // 3 页
   await sleep(50);
@@ -223,7 +223,7 @@ async function t8_rapid_page() {
 
 /* ⑨ D8：importJSON 中途失败也必须还原 _currentUserId + 上报 + 记录 skipped */
 async function t9_import_restore() {
-  var p = mk({ users: [{ id: 'u1', name: '甲方' }, { id: 'u2', name: '乙方' }] });
+  var p = mk({ users: [{ id: 'u1', name: '杭州云启智能科技有限公司' }, { id: 'u2', name: '深圳数联信息技术有限公司' }] });
   await p.load({ url: 'test.pdf', headers: { 'X-T': '1' } });
   var saved = p._currentUserId;
   var got = null, imported = null;
@@ -256,7 +256,7 @@ async function t9_import_restore() {
 
 /* ⑩ H2：历史快照共享 image 引用（不再按 base64 复制 N 份） */
 async function t10_history_memory() {
-  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  var p = mk({ users: [{ id: 'a', name: '杭州云启智能科技有限公司' }] });
   await p.load({ url: 'test.pdf', headers: { 'X-T': '1' } });
   var img = { src: 'data:image/png;base64,' + new Array(4096).join('A'), name: '章', width: 10, height: 10 };
   p.addStamp({ x: 10, y: 20, page: 1, image: img });

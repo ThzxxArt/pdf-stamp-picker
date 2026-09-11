@@ -26,8 +26,8 @@ function StampPickerApp() {
     if (!stageRef.current) return;
     const picker = new PdfStampPicker(stageRef.current, {
       users: [
-        { id: 'a1', name: '甲方', color: '#4285f4' },
-        { id: 'b1', name: '乙方', color: '#ea4335' }
+        { id: 'a1', name: '杭州云启智能科技有限公司', color: '#4285f4' },
+        { id: 'b1', name: '深圳数联信息技术有限公司', color: '#ea4335' }
       ],
       mode: 'stamp'
     });
@@ -48,7 +48,7 @@ function StampPickerApp() {
   const openModal = () => {
     PdfStampPicker.openModal({
       source: { url: 'test.pdf', headers: { 'X-M': 'r' } },
-      users: [{ id: 'a1', name: '甲方' }, { id: 'b1', name: '乙方' }],
+      users: [{ id: 'a1', name: '杭州云启智能科技有限公司' }, { id: 'b1', name: '深圳数联信息技术有限公司' }],
       title: 'React 弹窗',
       confirmText: '确认签章点',
       requireAllUsers: true,
