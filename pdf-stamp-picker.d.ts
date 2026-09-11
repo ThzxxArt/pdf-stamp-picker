@@ -70,6 +70,22 @@ export interface PdfStampPickerOptions {
    * 置 true 会在 PDF 展示后后台再请求一次该地址用于算 SHA-256，完成后触发 hashready 事件。
    */
   hashUrl?: boolean;
+  /** 加载超时 ms（默认 0 = 不限）。超时以 stage:'timeout' 的 error 事件 + reject 结束 */
+  loadTimeout?: number;
+  /** 是否保留 PDF 字节副本（默认 false：字节交给 pdf.js 后即被 transfer，省内存；true 时额外拷贝一份供复用） */
+  keepBytes?: boolean;
+  /** 画布模式 setPage() 是否清空签章（默认 true = 保持历史行为；false = 按页保留）。v5.0 计划默认改为 false */
+  clearStampsOnSetPage?: boolean;
+  /** 撤销历史最大步数（默认 50，1–500） */
+  historyLimit?: number;
+  /** fetch 凭据模式（默认 'same-origin'；跨域带 Cookie 的文件流接口需 'include'） */
+  credentials?: RequestCredentials;
+  /** fetch cache 模式透传（如 'no-store'） */
+  cache?: RequestCache;
+  /** fetch referrerPolicy 透传 */
+  referrerPolicy?: ReferrerPolicy;
+  /** 翻页时是否保留当前选区/选中态（默认 false） */
+  keepSelectionOnPageChange?: boolean;
   /** 已有 pdfjsLib 实例（可选，避免重复加载） */
   pdfjs?: unknown;
 }
@@ -126,6 +142,8 @@ export interface PickerJSON {
     /** PDF 文件 SHA-256 哈希（防篡改/文件指纹，部分加载方式下为 null） */
     hash?: string;
     hashAlgorithm?: 'SHA-256';
+    /** 哈希状态：ready=已就绪 / pending=计算中（纯 URL 补算场景）/ unavailable=本场景无字节可用 */
+    hashStatus: 'ready' | 'pending' | 'unavailable';
     generatedAt: string;
   };
   /** 签署方数组（含无签章点的签署方，stamps 为空数组） */
@@ -175,6 +193,11 @@ export default class PdfStampPicker {
   load(source: PdfSource, opts?: { pageNumber?: number; mode?: PickerMode; signal?: AbortSignal }): Promise<void>;
   /** 兼容 v1 的 PDF.js 集成模式 */
   loadPDF(source: PdfSource, opts?: { pageNumber?: number }): Promise<void>;
+  /**
+   * 中止当前加载（在途请求 + 后续渲染/哈希链）。
+   * 进行中的 load() 会以 name==='AbortError' 结束（预期行为，不派发 error 事件）。
+   */
+  abort(): this;
   /** 纯画布模式 */
   setPage(meta: SetPageMeta): this;
   /** 翻页 */
@@ -235,7 +258,13 @@ export default class PdfStampPicker {
    */
   getHash(): Promise<string | null>;
 
-  /** 事件：loadprogress / loaddone / stampadd / stampremove / select / pagechange / zoomchange / hashready … */
+  /**
+   * 事件订阅/退订（链式）。全部 15 个事件：
+   * ready / change / select / clear / pagechange / zoomchange /
+   * stampadd / stampremove / stampchange / stampselect / stampimage /
+   * import({count, users, skipped}) / hashready({hash, hashAlgorithm}) /
+   * overlap({stamp, overlaps}) / error({error, message, stage})
+   */
   on(type: string, fn: (payload: any) => void): this;
   off(type: string, fn: (payload: any) => void): this;
 

@@ -45,7 +45,7 @@
 **体验**
 - ⚡ **一键弹窗**：`openModal()` 免写容器/样式，宽高/模式/校验/含图全可配
 - 🧰 **工具栏可配置**：按钮按需隐藏，容器与弹窗行为一致
-- ↩️ **撤销/重做**（50 步）+ 序号角标 + 重叠警告 + 备注编辑 + 方向键微调
+- ↩️ **撤销/重做**（步数可配 `historyLimit`，默认 50）+ 序号角标 + 重叠警告 + 备注编辑 + 方向键微调
 
 **环境友好**
 - 📶 **内网/离线可用**：自动探测本地 `vendor/`，严格 MIME 环境自动 fetch+Blob 兜底
@@ -247,6 +247,9 @@ new PdfStampPicker('#stage', {
 
 - 加载时显示真实百分比进度（`PDF 加载中… 45%`），流接口/静态 URL 均支持
 - `load(source, { signal })` 支持外部 AbortSignal 中止；切换文档/`destroy()` 自动中止旧加载
+- `picker.abort()` 主动中止当前加载：在途请求立即取消，进行中的 `load()` 以 **`AbortError`** 结束（预期行为，不派发 `error` 事件）
+- `loadTimeout: 3000` 可为加载设上限：超时自动中止并以 `stage:'timeout'` 的 `error` 事件 + reject 结束，不会永久挂起
+- **并发 `load()` 语义（v4.9.0 起）**：旧的加载调用会以 `AbortError` 结束并**丢弃全部结果**（不写入任何状态），实例状态始终只属于最后一次 `load()`；换文档时哈希、签章点、历史栈、页码一并重置，不会串档
 - 翻页/缩放自动 cancel 未完成的渲染任务；`destroy()` 释放 pdf.js 文档资源（防内存累积）
 
 ---
@@ -327,6 +330,7 @@ picker.setCurrentUser('c');           // 后续新增的签章归属丙方
     "rotation": 0,
     "hash": "fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac",
     "hashAlgorithm": "SHA-256",
+    "hashStatus": "ready",
     "generatedAt": "2026-08-21T09:00:00.000Z"
   },
   "users": [
@@ -364,6 +368,9 @@ picker.setCurrentUser('c');           // 后续新增的签章归属丙方
   ```
 
   计算实现：优先 `crypto.subtle`（安全上下文最快）；**内网 HTTP（`http://192.168.x.x`）、`file://` 等【非安全上下文】下 `crypto.subtle` 不存在**，库会自动降级为**库内自带的纯 JS SHA-256**（v4.8.27 起；分块计算 + 让出主线程，大文件不卡 UI），结果与 Web Crypto/`sha256sum` 完全一致 —— 因此内网部署同样能拿到哈希，无需 HTTPS。
+- `document.hashStatus`（v4.9.0 起）：明确标注哈希状态，避免「hash 字段凭空消失」时无法判断原因 ——
+  `ready`（已就绪）· `pending`（计算中，纯 URL 补算场景，可 `getHash()` / `hashready` 取）· `unavailable`（本场景无字节可用，算不了）。
+  `toJSON()` 与 `toFlatJSON()` 输出结构一致（都带 `hash` / `hashAlgorithm` / `hashStatus`）。
 - 签章点默认**不含图片**（轻量）；`toJSON({ includeImage: true })` 可**包含章图 dataURL**（数据自包含）
 - 扁平版 `toFlatJSON()`：`stamps[]` 每项内嵌 `user`，需要按签章点遍历时用
 - 单用户查询：`getStampsByUser(userId)`
@@ -423,7 +430,7 @@ const signFlow = {
 
 ## 配置
 
-### 构造选项（全部 19 项）
+### 构造选项（全部 30 项）
 
 | option | 默认 | 说明 |
 |---|---|---|
@@ -449,6 +456,15 @@ const signFlow = {
 | `cMapUrl` | 自动探测 | 中文 PDF 字体映射目录（显式 > 自动探测本地 cMaps/ > pdf.js 默认 CDN） |
 | `compatCheck` | `false` | 旧浏览器兼容：默认 `false` 自动兼容（polyfill 兜底，不提示）；`true` 检测到原生缺失时提示升级并拒绝加载 |
 | `pdfjs` | — | 已有 pdfjsLib 实例（免重复加载，优先级最高） |
+| `hashUrl` | `false` | 纯 URL 流式加载时是否额外取一次字节算 `document.hash`（不阻塞 PDF 展示，完成后触发 `hashready`） |
+| `loadTimeout` | `0` | 加载超时 ms（0=不限）。超时以 `stage:'timeout'` 的 `error` 事件结束，不会永久挂起 |
+| `keepBytes` | `false` | 是否保留 PDF 字节副本。默认 `false`（字节交给 pdf.js 后即被 transfer，省内存）；`true` 时额外拷贝一份到 `_pdfBytesRef` 供复用 |
+| `clearStampsOnSetPage` | `true` | 画布模式 `setPage()` 是否清空签章（`true` 保持历史行为；`false` = 按页保留）。v5.0 计划默认改为 `false` |
+| `historyLimit` | `50` | 撤销历史最大步数（1–500） |
+| `credentials` | `'same-origin'` | `fetch` 凭据模式：`'omit'` / `'same-origin'` / `'include'`（跨域带 Cookie 的文件流接口需 `'include'`） |
+| `cache` | — | `fetch` cache 模式透传（内网可用 `'no-store'` 避免缓存旧 PDF） |
+| `referrerPolicy` | — | `fetch` referrerPolicy 透传 |
+| `keepSelectionOnPageChange` | `false` | 翻页时是否保留当前选区/选中态 |
 
 ### 工具栏配置（弹窗/容器通用）
 
@@ -485,8 +501,10 @@ new PdfStampPicker('#stage', { toolbar: false });
 
 | 类别 | 方法 | 说明 |
 |---|---|---|
-| **加载** | `load(source, {pageNumber, mode, signal})` | 统一入口：5 种 source；支持加载后切模式、AbortSignal 中止 |
+| **加载** | `load(source, {pageNumber, mode, signal})` | 统一入口：5 种 source；支持加载后切模式、AbortSignal 中止；并发调用时旧调用以 `AbortError` 结束 |
 | | `loadPDF(source, opts)` | 兼容旧名（同 `load`） |
+| | `abort()` | 中止当前加载（在途请求 + 后续渲染/哈希链），`load()` 以 `AbortError` 结束 |
+| | `getHash()` | `Promise<string\|null>` 等待并取得 PDF 的 SHA-256（`hashUrl` 补算场景用） |
 | | `setPage(meta)` | 纯画布模式：`{canvas, width, height, rotation, pageNumber, totalPages, name}` |
 | | `gotoPage(n)` | 翻页（Promise），自动补偿旋转；错误正确传播（不掩盖真实失败原因） |
 | **缩放** | `setZoom(z)` / `getZoom()` | 数字 / `'fit-width'` / `'fit-page'`；获取当前缩放 |
@@ -511,7 +529,7 @@ new PdfStampPicker('#stage', { toolbar: false });
 | | `toFlatJSON({includeImage})` | 扁平版（stamps[] 内嵌 user） |
 | | `importJSON(json, opts)` | 从 JSON 反显（`users[]` 或 `stamps[]` 均可） |
 | | `copyJSON()` | 复制 JSON 到剪贴板（内置 toast） |
-| **撤销** | `undo()` / `redo()` | 撤销/重做（Ctrl+Z / Ctrl+Shift+Z，上限 50 步） |
+| **撤销** | `undo()` / `redo()` | 撤销/重做（Ctrl+Z / Ctrl+Shift+Z，上限 `historyLimit`，默认 50 步） |
 | **面板** | `toggleList()` | 折叠/展开签章列表面板 |
 | **导出** | `exportImage(opts)` | 导出当前页+签章布局为 PNG：`{scale=2, includePdf=true, includeUi=false}`；`includePdf:false` 得透明底章图 |
 | **坐标** | `screenToPdf(x,y)` / `pdfToScreen(x,y)` | 屏幕 px ↔ PDF pt（含旋转补偿） |
@@ -527,7 +545,7 @@ new PdfStampPicker('#stage', { toolbar: false });
 | `PdfStampPicker.loadPdfJsAuto()` | 自动探测加载（本地 vendor → CDN 兜底） |
 | `PdfStampPicker.version` | 库版本号字符串 |
 
-### 事件（全部 14 个）
+### 事件（全部 15 个）
 
 | 事件 | 触发时机 | payload |
 |---|---|---|
@@ -542,9 +560,10 @@ new PdfStampPicker('#stage', { toolbar: false });
 | `stampchange` | 签章点被移动/缩放 | 更新后对象 |
 | `stampselect` | 选中签章点 | 签章点对象 |
 | `stampimage` | 签章图更换 | `{src, name, width, height}` |
-| `import` | JSON 导入完成 | `{count, users}` |
+| `import` | JSON 导入完成 | `{count, users, skipped}`（`skipped` = 被跳过的坏条目数） |
+| `hashready` | PDF 哈希就绪（含纯 URL 后台补算完成） | `{hash, hashAlgorithm}` |
 | `overlap` | 签章点重叠检测 | `{stamp, overlaps:[{id,userId,name}]}` |
-| `error` | 加载/运行错误 | `{message}` |
+| `error` | 加载/运行错误（含程序化 `load()` 失败、导入部分失败） | `{error, message, stage}`（`stage`: `prepare`/`read`/`hash`/`fetch`/`parse`/`timeout`/`import`/`compat`…） |
 
 ---
 

@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v4.8.28
+ * PdfStampPicker v4.9.0
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.28';
+  var VERSION = '4.9.0';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -314,7 +314,14 @@
       pdfjsUrl: null,   // 默认 null：本地探测 vendor/ 优先（内网离线可用），全部失败才 CDN 兜底
       cMapUrl: undefined,  // 中文 PDF 的 CMap 目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
       compatCheck: false,  // 旧浏览器检测：true=检测到原生缺失就提示升级+拒绝加载；默认 false=自动兼容(polyfill 兜底,不提示)
-      hashUrl: false       // 纯 URL 流式加载时是否额外取一次字节来算 document.hash（默认 false 不额外下载；需要内网 URL 也出哈希时置 true）
+      hashUrl: false,      // 纯 URL 流式加载时是否额外取一次字节来算 document.hash（默认 false 不额外下载；需要内网 URL 也出哈希时置 true）
+      loadTimeout: 0,      // 加载超时(ms)：0=不限（默认）。>0 时超时 reject 并派发 stage='timeout' 的 error
+      keepBytes: false,    // 是否保留 PDF 字节（默认 false：pdf.js 会 transfer 走 buffer，故不保留以省内存）。true 时额外拷贝一份供复用
+      clearStampsOnSetPage: true, // 画布模式 setPage() 是否清空签章（默认 true = 保持历史行为；false = 按页保留）。v5.0 将改为 false
+      historyLimit: 50,    // 撤销历史最大条数
+      credentials: 'same-origin', // fetch 凭据模式：'omit'|'same-origin'|'include'（跨域带 Cookie 的文件流接口需 'include'）
+      cache: undefined,    // fetch cache 模式（透传，如 'no-store'）
+      referrerPolicy: undefined // fetch referrerPolicy（透传）
     }, options || {});
     if (options && options.pdfjs) this._options.pdfjs = options.pdfjs;
 
@@ -347,12 +354,35 @@
     this._drag = null;
     this._stamps = [];      // 全部签章点（PDF 坐标）
     this._activeId = null;  // 活动签章 id
-    this._history = [JSON.stringify([])]; // 撤销栈（初始状态）
+    this._history = [[]];      // 撤销栈（快照数组；仅浅拷贝标量，image 按引用共享）
     this._historyIdx = 0;   // 当前历史位置
     this._listeners = {};
     this._raf = 0;
     this._destroyed = false;
     this._stampImg = null;   // {src, name, w, h, el(Image)}
+
+    // ★ H1 加载生命周期（根治并发/时序类缺陷）
+    //   每次 load()/setPage() 自增 _loadToken，其整条异步链（解析→哈希→渲染）在每个
+    //   await 之后都必须校验令牌；不匹配即视为已被后续调用取代，丢弃结果。
+    //   这样"状态残留/串档/混合状态"在结构上不可能发生，而不是靠逐个补状态。
+    this._loadToken = 0;      // 文档会话令牌
+    this._pageToken = 0;      // 页渲染令牌
+    this._loadTimer = 0;      // loadTimeout 定时器句柄
+    this._loadStage = '';     // 当前加载阶段（诊断用）
+    this._abortCtrl = null;
+    this._abortSignal = undefined;
+    this._pdfHash = null;        // 已就绪的 SHA-256（小写 hex）
+    this._pdfHashPromise = null; // 与加载并行的哈希 Promise（源自带字节时）
+    this._pdfHashPending = null; // 纯 URL 场景的后台补算 Promise
+    this._pdfBytes = null;       // ★ 注意：交给 pdf.js 后会被 transfer 成 detached，
+                                 //   请勿复用（需保留请开 keepBytes:true，届时另存副本）
+    this._pdfBytesRef = null;    // keepBytes:true 时的独立字节副本
+    this._sourceKind = null;     // 'file'|'arraybuffer'|'url'|'url-stream'|'proxy'|'canvas'
+    this._lastError = null;      // 最近一次失败（诊断用）
+    this._pdfjsSource = null;    // pdf.js 来源（'local'|'cdn'|'inline'|'blob'）
+    this._workerMode = null;     // worker 模式（'direct'|'blob'|'disabled'）
+    this._polyfillsUsed = [];    // 本次实际注入的 polyfill（诊断用）
+    this._imgCache = null;       // Image 元素缓存（dataURL → Image）
 
     // ★ 记录浏览器【原生】兼容性（必须在 polyfill 注入之前——否则 polyfill 会"骗过"检测）
     this._nativeCompat = {
@@ -662,7 +692,6 @@
   PdfStampPicker.prototype.load = function (source, opts) {
     var self = this;
     opts = opts || {};
-    var p;
 
     // 浏览器兼容检测：pdf.js 3.11 需要多项现代 API（Array.at/TypedArray.at/structuredClone 等）
     // 默认自动兼容（polyfill 兜底）；仅 compatCheck:true 时，原生缺失才提示升级+拒绝加载
@@ -674,61 +703,99 @@
       if (!this._nativeCompat.structuredClone) missing.push('structuredClone');
       if (missing.length) {
         this._showCompatWarning(missing);
-        return Promise.reject(new Error('当前浏览器版本过旧，无法加载 PDF。缺少：' + missing.join('、') + '。请升级到 Chrome/Edge 98+、Firefox 94+ 或 Safari 15.4+。'));
+        return Promise.reject(this._fail(new Error('当前浏览器版本过旧，无法加载 PDF。缺少：' + missing.join('、') +
+          '。请升级到 Chrome/Edge 98+、Firefox 94+ 或 Safari 15.4+。'), 'compat'));
       }
     }
 
-    // 中止上一次未完成的加载（切换文档时）
+    /* ★★ H1「加载会话令牌」—— 根治一切并发/时序类缺陷
+     *   D2 跨文档哈希串档、D3 并发 load 混合状态、D4 陈旧哈希回写、D5 失败被吞，根因都是
+     *   "旧加载的异步结果落到了新文档上"。与其逐个补状态，不如给每次加载发一张令牌：
+     *   自增后，本次加载的整条异步链（取字节 → 算哈希 → pdf.js 解析 → 渲染 → 事件）
+     *   在每个 await 之后都必须校验 _isCurrentLoad(token)；一旦不匹配，立即释放已建资源并中止。
+     *   于是"跨文档污染"在结构上不可能发生。 */
+    var token = ++this._loadToken;
+    this._lastError = null;
+
+    // 中止上一次在途网络请求
     if (this._abortCtrl) { try { this._abortCtrl.abort(); } catch (e) { /* ignore */ } }
     this._abortCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     this._abortSignal = opts.signal || (this._abortCtrl ? this._abortCtrl.signal : undefined);
-    // 释放旧文档（防内存累积）
-    if (this._pdf && this._pdf.destroy) { try { this._pdf.destroy(); } catch (e) { /* ignore */ } }
-    this._pdf = null;
-    // 清旧文档页面状态（防加载失败后 _pageInfo 输出旧数据）
-    this._page = null;
-    this._pageNumber = 1;
-    this._pdfW = 0; this._pdfH = 0;
-    // 换文档 → 旧哈希立即作废（加载失败时不会误报上一篇的哈希）
-    this._pdfHash = null;
-    this._pdfHashPending = null;
 
-    // 记录 URL 来源：纯 URL 流式加载无字节缓存，hashUrl:true 时需后台补算哈希
+    // 释放旧文档（防内存累积）
+    this._discardDoc(this._pdf);
+    this._pdf = null;
+
+    // ★ 统一重置全部文档级状态（新增文档级字段请登记到 _resetDocState，不要在此散写 —— 那正是 D2 的成因）
+    //   注意顺序：_resetDocState 会把 _loadStage 归零，故 'prepare' 必须在它之后设置
+    this._resetDocState();
+    this._loadStage = 'prepare';
+
+    var p;
     var urlForHash = null, headersForHash = null;
+
     if (isPdfjsProxy(source)) {
+      this._sourceKind = 'proxy';
       p = Promise.resolve(source);
     } else if (typeof source === 'string') {
+      this._sourceKind = 'url-stream';
       urlForHash = source;
-      p = this._loadRemote({ url: source, signal: this._abortSignal });
+      p = this._loadRemote({ url: source, signal: this._abortSignal, token: token });
     } else if (source && typeof source === 'object' && typeof source.url === 'string' && !(source instanceof ArrayBuffer)) {
+      this._sourceKind = 'url';
       urlForHash = source.url;
       headersForHash = source.headers || null;
-      p = this._loadRemote(Object.assign({}, source, { signal: this._abortSignal }));
+      p = this._loadRemote(Object.assign({}, source, { signal: this._abortSignal, token: token }));
     } else if (typeof File !== 'undefined' && source instanceof File) {
+      this._sourceKind = 'file';
       this._docName = source.name || '本地文件.pdf';
       // 类型校验：明显非 PDF 的文件提前报错（避免 pdf.js 解析后报晦涩错误）
       var ftype = (source.type || '').toLowerCase();
       var fname = (source.name || '').toLowerCase();
       if (ftype && ftype.indexOf('pdf') < 0 && ftype.indexOf('octet-stream') < 0 && !/\.pdf$/.test(fname)) {
-        return Promise.reject(new Error('不是有效的 PDF 文件：' + (source.name || '')));
+        return Promise.reject(this._fail(new Error('不是有效的 PDF 文件：' + (source.name || '')), 'type'));
       }
-      this._pdfHashPromise = source.arrayBuffer().then(function (buf) {
+      this._loadStage = 'read';
+      p = source.arrayBuffer().then(function (buf) {
+        if (!self._isCurrentLoad(token)) throw supersededError();
         self._pdfBytes = buf;
-        return sha256(buf);
-      });
-      p = this._pdfHashPromise.then(function () {
-        return self._getDoc({ data: self._pdfBytes });
+        if (self._options.keepBytes === true) self._pdfBytesRef = buf.slice(0); // 显式保留独立副本
+        self._loadStage = 'hash';
+        self._pdfHashPromise = sha256(buf);
+        // ★ 必须先等哈希算完再交给 pdf.js：pdf.js 会以 transfer 方式把 ArrayBuffer 交给 worker，
+        //   主线程侧该 buffer 随即 detached（byteLength → 0）。纯 JS SHA-256 兜底是分块异步读的，
+        //   若 buffer 在读完前被 transfer，后续分块会读到全 0 → 静默产出错误哈希（v4.8.28 已修此链）。
+        return self._pdfHashPromise.then(function (h) {
+          self._pdfHash = h || null;
+          if (!self._isCurrentLoad(token)) throw supersededError();
+          self._loadStage = 'parse';
+          return self._getDoc({ data: buf }, token);
+        });
       });
     } else if (source instanceof ArrayBuffer || (typeof Uint8Array !== 'undefined' && source instanceof Uint8Array)) {
+      this._sourceKind = 'arraybuffer';
       var bytes = (source instanceof Uint8Array) ? source.slice().buffer : source;
       this._pdfBytes = bytes;
+      if (this._options.keepBytes === true) this._pdfBytesRef = bytes.slice(0);
+      this._loadStage = 'hash';
       this._pdfHashPromise = sha256(bytes);
-      p = this._pdfHashPromise.then(function () { return self._getDoc({ data: bytes }); });
+      p = this._pdfHashPromise.then(function (h) {
+        self._pdfHash = h || null;
+        if (!self._isCurrentLoad(token)) throw supersededError();
+        self._loadStage = 'parse';
+        return self._getDoc({ data: bytes }, token);
+      });
     } else {
-      return Promise.reject(new Error('[PdfStampPicker] 无法识别的 PDF 来源'));
+      return Promise.reject(this._fail(new Error('[PdfStampPicker] 无法识别的 PDF 来源'), 'source'));
     }
 
+    // 可选：加载超时（H1 —— 长挂起的加载在 destroy/并发时更难收敛，超时统一走 _fail(stage='timeout')）
+    p = this._withTimeout(p, token);
+
     return p.then(function (doc) {
+      // ★ 令牌校验：已被取代 → 释放刚建好的文档，绝不写入状态
+      if (!self._isCurrentLoad(token)) { self._discardDoc(doc); throw supersededError(); }
+      self._loadStage = 'ready';
       self._setLoading(true, 'PDF 解析中…');
       self._pdf = doc;
       self._totalPages = doc.numPages;
@@ -740,43 +807,41 @@
       self._stamps = [];
       self._activeId = null;
       self._sel = null;
-      self._history = [JSON.stringify([])];
+      self._history = [[]];
       self._historyIdx = 0;
-      // 等待哈希计算完成（若可用）写入缓存，toJSON() 时同步读取
+      // 哈希落地：等待 Promise 写入（已写入则同步可见）
       if (self._pdfHashPromise) {
-        self._pdfHashPromise.then(function (h) { self._pdfHash = h; }).catch(function () { self._pdfHash = null; });
-      } else {
-        self._pdfHash = null;
+        self._pdfHashPromise.then(function (h) { if (self._isCurrentLoad(token)) self._pdfHash = h || null; })
+                            .catch(function () { if (self._isCurrentLoad(token)) self._pdfHash = null; });
+      } else if (self._options.hashUrl === true && urlForHash) {
         // 纯 URL 流式加载（pdf.js 原生流式 → 无字节缓存）：hashUrl:true 时后台补算哈希
-        // 补算不阻塞加载；完成后写入 _pdfHash 并触发 hashready 事件
-        if (self._options.hashUrl === true && urlForHash) {
-          self._computeHashFromUrl(urlForHash, headersForHash);
-        }
+        self._computeHashFromUrl(urlForHash, headersForHash, token);
       }
       self._renderList();
-      return self.gotoPage(opts.pageNumber || 1);
+      return self.gotoPage(opts.pageNumber || 1, token);
     }).then(function () {
+      if (!self._isCurrentLoad(token)) throw supersededError();
       // 加载完成后按需切换选择模式（可选性加载）
-      if (opts.mode && self._options.mode !== opts.mode) {
-        self.setMode(opts.mode);
-      }
+      if (opts.mode && self._options.mode !== opts.mode) self.setMode(opts.mode);
       self._setLoading(false);
+      self._loadStage = 'done';
     }).catch(function (err) {
+      // 已被后续 load()/destroy() 取代：以 AbortError 结束，且【不触碰任何状态】（新会话才是唯一真相）
+      if (!self._isCurrentLoad(token)) throw (isAbortError(err) ? err : supersededError());
+      // 主动中止 / 超时：预期内，静默交给调用方（超时已带 stage，仍会走下面 _fail 上报）
+      if (isAbortError(err)) { self._setLoading(false); self._discardHalfLoaded(); throw err; }
       self._setLoading(false);
-      // 中止加载是预期行为（切换文档/销毁），不视为错误
-      if (err && (err.name === 'AbortError' || /已中止/.test(err.message || ''))) return;
-      var msg = (err && err.message) || String(err);
-      // pdf.js 不可用给出明确提示（可能是离线且本地 vendor 缺失）
-      if (/pdf\.js|pdfjsLib/.test(msg) || /no pdfjsLib|load fail/.test(msg)) {
-        msg = 'pdf.js 加载失败：请确认 vendor/pdf.min.js 存在（离线）或网络可访问 CDN，或配置 pdfjsUrl';
-      }
-      throw new Error(msg);
+      // ★ 统一失败出口：派发 error 事件（含 stage），再抛出 —— 根治 D5（程序化加载失败无任何通知）
+      var failStage = err && err.stage ? err.stage : (self._loadStage || 'load');
+      self._discardHalfLoaded();   // 失败前未就绪 → 不留半套文档状态（名字/页数/画布互相矛盾）
+      throw self._fail(err, failStage);
     });
   };
 
   /** 远程加载：静态 URL 或文件流接口 */
   PdfStampPicker.prototype._loadRemote = function (cfg) {
     var self = this;
+    var token = cfg.token;
     var url = cfg.url;
     var name = '';
     try { name = decodeURIComponent(url.split('?')[0].split('/').pop()) || ''; } catch (e) { /* ignore */ }
@@ -786,48 +851,81 @@
     var hasHeaders = Object.keys(headers).length > 0;
     if (!hasCustom && !hasHeaders) {
       // 纯静态地址 → pdf.js 原生流式加载（支持大文件、Range 请求、onProgress）
-      return this._getDoc({ url: url });
+      this._sourceKind = 'url-stream';
+      this._loadStage = 'parse';   // 诊断用：失败时 stage 不会停留在 'prepare'
+      return this._getDoc({ url: url }, token);
     }
     // 文件流接口 / 自定义头 → fetch 流式取字节（带进度 + 可中止）
     var signal = cfg.signal || this._abortSignal;
-    return fetch(url, {
+    // ★ H5：网络语义可配置（跨域带 Cookie 的文件流接口需 credentials:'include'；内网可配 cache:'no-store' 避免缓存旧 PDF）
+    var fetchOpts = {
       method: cfg.method || 'GET',
       headers: headers,
       body: cfg.body || undefined,
-      signal: signal
-    }).then(function (res) {
+      signal: signal,
+      credentials: (cfg.credentials !== undefined) ? cfg.credentials : this._options.credentials
+    };
+    if (cfg.cache !== undefined) fetchOpts.cache = cfg.cache;
+    else if (this._options.cache !== undefined) fetchOpts.cache = this._options.cache;
+    if (cfg.referrerPolicy !== undefined) fetchOpts.referrerPolicy = cfg.referrerPolicy;
+    else if (this._options.referrerPolicy !== undefined) fetchOpts.referrerPolicy = this._options.referrerPolicy;
+
+    this._loadStage = 'fetch';
+    return fetch(url, fetchOpts).then(function (res) {
       if (!res.ok) throw new Error('[PdfStampPicker] 加载 PDF 失败 HTTP ' + res.status + ' ' + res.statusText);
       var total = parseInt(res.headers.get('Content-Length') || '0', 10) || 0;
       var reader = res.body && res.body.getReader ? res.body.getReader() : null;
       // 旧浏览器（不支持 Array.at，如 Edge 90）的 fetch 流式读取有已知 bug，可能读成空 body → 直接一次性 arrayBuffer
       if (!reader || !isCompatSupported().ok) return res.arrayBuffer();
-      var chunks = [];
+
+      /* ★ H2-1 内存根治：优先按 Content-Length 预分配单块 Uint8Array，边读边写入。
+       *   旧实现 chunks[] + new Blob(chunks).arrayBuffer() 的峰值内存 ≈ 2× 文件大小
+       *   （chunks 全部片段 + Blob 复制 + 最终 arrayBuffer），200MB 扫描件在移动端直接 OOM。
+       *   预分配后峰值 ≈ 1× 文件大小。 */
+      var buf = total > 0 ? new Uint8Array(total) : null;
+      var chunks = buf ? null : [];
       var received = 0;
       var pump = function () {
         return reader.read().then(function (r) {
           if (r.done) return;
-          chunks.push(r.value);
-          received += r.value.length;
+          var v = r.value;
+          if (buf && received + v.length <= total) {
+            buf.set(v, received);
+          } else if (buf) {
+            // Content-Length 与实际不符（gzip/分块传输等）→ 退化为片段收集
+            chunks = [buf.subarray(0, received)];
+            buf = null;
+            chunks.push(v);
+          } else {
+            chunks.push(v);
+          }
+          received += v.length;
           self._onLoadProgress(received, total);
           return pump();
         });
       };
-      return pump().then(function () { return new Blob(chunks).arrayBuffer(); });
+      return pump().then(function () {
+        if (buf) return received === total ? buf.buffer : buf.buffer.slice(0, received);
+        return new Blob(chunks).arrayBuffer();
+      });
     }).then(function (buf) {
+      // ★ 令牌校验（网络返回时可能已被取代）
+      if (token != null && !self._isCurrentLoad(token)) throw supersededError();
       // 缓存字节并计算哈希（静态 URL 走 pdf.js 流式时无字节缓存，哈希为 null）
       self._pdfBytes = buf;
+      if (self._options.keepBytes === true) self._pdfBytesRef = buf.slice(0);
+      self._loadStage = 'hash';
       self._pdfHashPromise = sha256(buf);
-      // ★ 必须先等哈希算完再交给 pdf.js：pdf.js 会把 ArrayBuffer 以 transfer 方式
-      //   交给 worker，主线程侧这块 buffer 随即变成 detached（byteLength → 0）。
-      //   而纯 JS SHA-256 兜底是【分块 + setTimeout 让出主线程】异步读取的，
-      //   内网 HTTP（crypto.subtle 不可用）加载较大 PDF 时，若 buffer 在读取完成前
-      //   已被 transfer，后续分块读到的全是 0 → 静默得到一个【错误但看起来正常】的哈希。
-      //   （其它加载路径本就先 await 哈希再 _getDoc，这里补齐一致。）
-      return self._pdfHashPromise.then(function () { return self._getDoc({ data: buf }); });
+      // ★ 必须先等哈希算完再交给 pdf.js（pdf.js 会 transfer/neuter 该 buffer，见 load() 内注释）
+      return self._pdfHashPromise.then(function (h) {
+        self._pdfHash = h || null;
+        if (token != null && !self._isCurrentLoad(token)) throw supersededError();
+        self._loadStage = 'parse';
+        return self._getDoc({ data: buf }, token);
+      });
     }).catch(function (err) {
-      if (err && err.name === 'AbortError') {
-        throw new Error('[PdfStampPicker] 加载已中止');
-      }
+      if (err && err.name === 'AbortError') throw err;
+      if (isAbortError(err)) throw err;
       if (err && err.name === 'TypeError' && /fetch|network/i.test(String(err.message || ''))) {
         throw new Error('[PdfStampPicker] 网络请求失败，请检查 CORS 与地址可达性: ' + url);
       }
@@ -840,20 +938,28 @@
    * 背景：纯静态地址走 pdf.js 原生流式（Range/大文件友好），库拿不到字节 → 无法算哈希。
    * 开启后额外请求一次同一地址的字节用于计算 SHA-256，不阻塞 PDF 展示；
    * 完成后写入 _pdfHash 并触发 hashready 事件（可用 on('hashready', fn) 或 getHash() 等待）。
+   * ★ D4 根治：补算结果必须校验加载令牌 —— 否则切换文档后，旧地址的哈希会回写到新文档上。
    */
-  PdfStampPicker.prototype._computeHashFromUrl = function (url, headers) {
+  PdfStampPicker.prototype._computeHashFromUrl = function (url, headers, token) {
     var self = this;
     if (!url || typeof fetch === 'undefined') return;
-    var opts = { credentials: 'same-origin' };
+    var opts = { credentials: this._options.credentials };
     if (headers && Object.keys(headers).length) opts.headers = headers;
+    if (this._options.cache !== undefined) opts.cache = this._options.cache;
+    if (this._options.referrerPolicy !== undefined) opts.referrerPolicy = this._options.referrerPolicy;
     if (this._abortSignal) opts.signal = this._abortSignal;
     this._pdfHashPending = fetch(url, opts)
       .then(function (res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.arrayBuffer();
       })
-      .then(function (buf) { return sha256(buf); })
+      .then(function (buf) {
+        if (token != null && !self._isCurrentLoad(token)) throw supersededError();
+        return sha256(buf);
+      })
       .then(function (h) {
+        // ★ 陈旧性校验：已被取代/已销毁则【丢弃】，绝不回写旧哈希
+        if (token != null && !self._isCurrentLoad(token)) return null;
         if (h) {
           self._pdfHash = h;
           self._emit('hashready', { hash: h, hashAlgorithm: 'SHA-256' });
@@ -865,17 +971,156 @@
 
   /**
    * 等待并获取当前 PDF 的 SHA-256 哈希（Promise<string|null>）
-   * 适用：纯 URL + hashUrl:true 时哈希是加载完成后异步补算的，调用方需等待就绪
+   * 适用：纯 URL + hashUrl:true 时哈希是加载完成后异步补算的，调用方需等待就绪。
    * @returns {Promise<string|null>} 小写 hex；不可用时为 null
    */
   PdfStampPicker.prototype.getHash = function () {
+    var self = this;
     if (this._pdfHash) return Promise.resolve(this._pdfHash);
-    if (this._pdfHashPromise) return this._pdfHashPromise;
-    if (this._pdfHashPending) return this._pdfHashPending;
-    return Promise.resolve(null);
+    var p = this._pdfHashPending || this._pdfHashPromise;
+    if (!p) return Promise.resolve(null);
+    return Promise.resolve(p).then(function () {
+      return self._pdfHash || null;
+    }, function () {
+      return self._pdfHash || null;
+    });
   };
 
-  PdfStampPicker.prototype._getDoc = function (pdfjsCfg) {
+  /**
+   * 当前哈希状态：'ready' | 'pending' | 'unavailable'
+   * 会随 toJSON()/toFlatJSON() 一起输出（document.hashStatus），
+   * 用于区分"已算好 / 还在算 / 本场景算不了"，避免只看到 hash 字段消失而无法判断原因。
+   */
+  PdfStampPicker.prototype._hashStatus = function () {
+    if (this._pdfHash) return 'ready';
+    if (this._pdfHashPromise || this._pdfHashPending) return 'pending';
+    return 'unavailable';
+  };
+
+  /**
+   * 当前加载会话是否仍然有效（令牌匹配且未销毁）。
+   * ★ H1 的唯一判定入口：所有加载链上的 await 之后都必须调用它。
+   */
+  PdfStampPicker.prototype._isCurrentLoad = function (token) {
+    return !this._destroyed && token === this._loadToken;
+  };
+
+  /** 释放一个不再需要的 pdf.js 文档（worker 侧资源），失败不影响主流程 */
+  PdfStampPicker.prototype._discardDoc = function (doc) {
+    if (!doc || typeof doc.destroy !== 'function') return;
+    try { doc.destroy(); } catch (e) { /* ignore */ }
+  };
+
+  /**
+   * 统一的失败出口：登记诊断信息 + 派发 error 事件，返回可抛出的 Error。
+   * 所有失败都必须流经此处，杜绝"静默失败"。
+   */
+  PdfStampPicker.prototype._fail = function (err, stage) {
+    var e = (err instanceof Error) ? err : new Error(String(err));
+    if (!e.stage) e.stage = stage || 'unknown';
+    this._lastError = { message: e.message, stage: e.stage, at: Date.now() };
+    this._emit('error', { error: e, message: e.message, stage: e.stage });
+    return e;
+  };
+
+  /**
+   * 主动中止当前加载（在途网络请求 + 后续渲染）。
+   * 语义与 AbortController 一致：进行中的 load() 会以 AbortError 结束。
+   */
+  PdfStampPicker.prototype.abort = function () {
+    // 是否真的有一次"未就绪"的加载在途（决定要不要清残留状态）
+    var wasLoading = !!this._loadStage && this._loadStage !== 'ready' && this._loadStage !== 'done';
+    this._loadToken++;   // 令所有在途异步链失效
+    if (this._abortCtrl) { try { this._abortCtrl.abort(); } catch (e) { /* ignore */ } }
+    if (this._loadTimer) { clearTimeout(this._loadTimer); this._loadTimer = 0; }
+    this._setLoading(false);
+    // ★ 必须在此显式清理：token 自增后，在途 load() 走的是"被取代"分支（不清理），
+    //   否则中止后会残留"文件名已显示、文档却是空的"状态。
+    //   已完成（ready/done）时不动状态 —— abort() 对已加载好的文档是空操作。
+    if (wasLoading) this._discardHalfLoaded();
+    return this;
+  };
+
+  /**
+   * 加载超时包装（options.loadTimeout > 0 时生效）。
+   * 超时会中止在途请求并以 stage='timeout' 的错误结束，避免永久挂起。
+   */
+  PdfStampPicker.prototype._withTimeout = function (p, token) {
+    var self = this;
+    var ms = this._options.loadTimeout;
+    if (!ms || ms <= 0) return p;
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        if (self._loadTimer === timer) self._loadTimer = 0;
+        if (self._isCurrentLoad(token) && self._abortCtrl) {
+          try { self._abortCtrl.abort(); } catch (e) { /* ignore */ }
+        }
+        var e = new Error('[PdfStampPicker] 加载超时（' + ms + 'ms）');
+        e.stage = 'timeout';
+        reject(e);
+      }, ms);
+      self._loadTimer = timer;
+      var settle = function (fn) {
+        return function (v) {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          if (self._loadTimer === timer) self._loadTimer = 0;
+          fn(v);
+        };
+      };
+      p.then(settle(resolve), settle(reject));
+    });
+  };
+
+  /**
+   * 统一重置全部【文档级】状态。
+   * ★ 这是防止"跨文档状态残留"的唯一入口：新增文档级字段时请登记在此，
+   *   不要在 load()/setPage()/destroy() 里各写一遍（散写正是 D2 哈希串档的成因）。
+   */
+  PdfStampPicker.prototype._resetDocState = function () {
+    this._page = null;
+    this._pageNumber = 1;
+    this._pdfW = 0;
+    this._pdfH = 0;
+    this._offsetX = 0;
+    this._offsetY = 0;
+    this._rotation = 0;
+    // 哈希（三件套必须一起清：只清 _pdfHash 会让旧的 _pdfHashPromise 在下次 load 时被误判为"本次已有哈希"）
+    this._pdfHash = null;
+    this._pdfHashPromise = null;
+    this._pdfHashPending = null;
+    // 字节缓存（交给 pdf.js 后即 detached，_pdfBytesRef 才是 keepBytes 的独立副本）
+    this._pdfBytes = null;
+    this._pdfBytesRef = null;
+    // 签章与历史
+    this._stamps = [];
+    this._activeId = null;
+    this._sel = null;
+    this._history = [[]];
+    this._historyIdx = 0;
+    this._lastError = null;
+    // ★ 文档标识也要清：只清画布不清名字，会出现"文件名显示了、页数却是空的"自相矛盾状态
+    //   （实测：加载中 abort() 后 toJSON().document.name 仍是未加载完的名字）
+    this._docName = '';
+    this._totalPages = 1;
+    this._loadStage = '';
+  };
+
+  /**
+   * 半成品文档清理：加载在 ready 之前失败 / 被中止时调用（H1 收口的一部分）。
+   * 已就绪（ready/done）后的失败【不清理】—— 那属于"文档已加载成功、后续步骤出错"，文档本身仍可用。
+   */
+  PdfStampPicker.prototype._discardHalfLoaded = function () {
+    var st = this._loadStage;
+    if (st === 'ready' || st === 'done') return;
+    this._resetDocState();
+  };
+
+  PdfStampPicker.prototype._getDoc = function (pdfjsCfg, token) {
     var self = this;
     var cfg = Object.assign({}, pdfjsCfg);
     // 加载进度（pdf.js onProgress）
@@ -909,17 +1154,32 @@
       return probe().then(function () {
         var u = self._options.cMapUrl || self._detectedCMapUrl || null;
         if (u) { cfg.cMapUrl = u; cfg.cMapPacked = true; }
-        return self._ensurePdfjs().then(function (pdfjs) {
-          return pdfjs.getDocument(cfg).promise;
-        });
+        return self._resolveDoc(cfg, token);
       });
     }
     if (cMapUrl || this._detectedCMapUrl) {
       cfg.cMapUrl = cMapUrl || this._detectedCMapUrl;
       cfg.cMapPacked = true; // .bcmap 压缩格式
     }
+    return this._resolveDoc(cfg, token);
+  };
+
+  /**
+   * 由 pdf.js 配置解析文档，并做【加载会话令牌】校验（H1 根治点）。
+   * 若解析期间本次加载已被后续 load()/destroy() 取代，则销毁刚建好的文档
+   * （释放 worker 侧资源）并抛 AbortError —— 绝不把过期结果写进实例状态。
+   */
+  PdfStampPicker.prototype._resolveDoc = function (cfg, token) {
+    var self = this;
     return this._ensurePdfjs().then(function (pdfjs) {
+      if (token != null && !self._isCurrentLoad(token)) throw supersededError();
       return pdfjs.getDocument(cfg).promise;
+    }).then(function (doc) {
+      if (token != null && !self._isCurrentLoad(token)) {
+        self._discardDoc(doc);
+        throw supersededError();
+      }
+      return doc;
     });
   };
 
@@ -1188,7 +1448,14 @@
    */
   PdfStampPicker.prototype.setPage = function (meta) {
     if (!meta || !meta.canvas) throw new Error('[PdfStampPicker] setPage 需要 canvas');
+    // ★ H1：画布模式换页同样开启"新文档会话" —— 自增令牌并使在途的 PDF 加载/渲染/哈希补算
+    //   全部失效，避免它们在画布模式之后回写状态（跨模式残留）。
+    this._loadToken++;
+    if (this._abortCtrl) { try { this._abortCtrl.abort(); } catch (e) { /* ignore */ } }
+    if (this._loadTimer) { clearTimeout(this._loadTimer); this._loadTimer = 0; }
+    this._discardDoc(this._pdf);
     this._pdfMode = 'canvas';
+    this._sourceKind = 'canvas';
     this._pdf = null;
     this._page = null;
     this._pdfW = meta.width;
@@ -1199,14 +1466,23 @@
     this._pageNumber = meta.pageNumber || 1;
     this._totalPages = meta.totalPages || 1;
     this._docName = meta.name || this._docName;
-    this._stamps = [];
-    this._activeId = null;
-    this._sel = null;
+    // ★ D9 根治：是否清空签章改为可配置（clearStampsOnSetPage）
+    //   默认 true = 保持历史行为（不破坏既有宿主）；置 false 可让签章按页保留。
+    //   v5.0 计划把默认值改为 false（画布模式语义上应"按页保留"）。
+    if (this._options.clearStampsOnSetPage !== false) {
+      this._stamps = [];
+      this._activeId = null;
+      this._sel = null;
+      this._history = [[]];
+      this._historyIdx = 0;
+    }
     // 纯画布模式无 PDF 字节 → 清哈希缓存（防 toJSON 输出旧 load 的哈希）
     this._pdfBytes = null;
+    this._pdfBytesRef = null;
     this._pdfHash = null;
     this._pdfHashPromise = null;
     this._pdfHashPending = null;
+    this._lastError = null;
 
     var old = this._canvas;
     var cv = meta.canvas;
@@ -1223,16 +1499,24 @@
     return this;
   };
 
-  PdfStampPicker.prototype.gotoPage = function (n) {
+  PdfStampPicker.prototype.gotoPage = function (n, loadToken) {
     var self = this;
     n = clamp(Math.round(n || 1), 1, this._totalPages);
     if (this._pdfMode !== 'pdfjs' || !this._pdf) return Promise.resolve();
     if (n === this._pageNumber && this._page) return Promise.resolve();
-    var token = (this._pageToken = (this._pageToken || 0) + 1); // 竞态防护：快速翻页时旧页渲染作废
+    // ★ H1：双重令牌校验
+    //   · 文档会话令牌(loadToken/_loadToken)：一旦发生新的 load()/abort()/destroy()，
+    //     本次渲染链条立即作废 —— 防止旧文档的页面/尺寸/总页数覆盖到新文档上。
+    //   · 页渲染令牌(_pageToken)：快速翻页时旧的页渲染作废，防止时序错乱。
+    var docToken = (loadToken != null) ? loadToken : this._loadToken;
+    var token = (this._pageToken = (this._pageToken || 0) + 1);
+    function stale() {
+      return self._destroyed || token !== self._pageToken || docToken !== self._loadToken;
+    }
     this._pageNumber = n;
     this._setLoading(true, '第 ' + n + ' 页渲染中…');
     return this._pdf.getPage(n).then(function (page) {
-      if (self._destroyed || token !== self._pageToken) return;
+      if (stale()) return;
       self._page = page;
       var view = page.view;
       self._pdfW = view[2] - view[0];
@@ -1246,7 +1530,7 @@
       }
       self._layoutPage();
       return self._renderPage().then(function () {
-        if (self._destroyed || token !== self._pageToken) return;
+        if (stale()) return;
         self._updateToolbar();
         self._paint();
         self._setLoading(false);
@@ -1255,7 +1539,8 @@
     }).catch(function (err) {
       // ★ 用 self 而非 this：严格模式下普通函数回调 this 为 undefined，导致
       //   'Cannot read property _pageToken of undefined'，且覆盖真正的加载失败原因
-      if (token === self._pageToken) self._setLoading(false);
+      if (stale()) return;       // 已作废：静默退出，绝不改动 loading（可能属于新加载）
+      self._setLoading(false);
       throw err;
     });
   };
@@ -1777,6 +2062,7 @@
       offsetX: this._offsetX,
       offsetY: this._offsetY,
       hash: this._pdfHash || null,
+      hashStatus: this._hashStatus(),
       includeImage: !!opts.includeImage
     };
     return buildJSON(doc, this._stamps, this._users);
@@ -1794,6 +2080,8 @@
       rotation: this._rotation,
       offsetX: this._offsetX,
       offsetY: this._offsetY,
+      hash: this._pdfHash || null,
+      hashStatus: this._hashStatus(),
       includeImage: !!opts.includeImage
     }, this._stamps, this._users);
   };
@@ -1837,10 +2125,16 @@
 
     var firstPage = 0;
     var batchCount = 0;
-    var savedUserId = this._currentUserId;   // 记录导入前用户，结束后还原
+    var skipped = 0;                          // H4：坏条目计数（不再静默丢弃）
+    var failure = null;
+    var savedUserId = this._currentUserId;    // 记录导入前用户，结束后还原
+    // ★ D8 根治：用 try/finally 保证临时切换的 _currentUserId 一定还原 ——
+    //   旧实现若循环中途抛错（如章图加载失败），还原语句被跳过，外部签署方状态被污染。
+    try {
     for (var i = 0; i < stamps.length; i++) {
       var st = stamps[i];
-      if (!st || typeof st.x !== 'number' || typeof st.y !== 'number') continue;
+      if (!st || typeof st.x !== 'number' || typeof st.y !== 'number' ||
+          !isFinite(st.x) || !isFinite(st.y)) { skipped++; continue; }
       var targetUserId = st.userId || self._currentUserId;
       // ★ 无 image 的签章点：按签章点所属用户生成章图（避免全部用当前用户章图导致公章文字错误）
       if (!st.image && targetUserId) {
@@ -1859,7 +2153,11 @@
       batchCount++;
       if (st.page && (!firstPage || st.page < firstPage)) firstPage = st.page;
     }
-    this._currentUserId = savedUserId;   // 还原导入前用户（不改变外部状态）
+    } catch (e) {
+      failure = e;                          // 记录失败，但仍落地已完成部分
+    } finally {
+      this._currentUserId = savedUserId;    // ★ 无论如何都还原（不改变外部状态）
+    }
 
     // 批量收尾：一次历史 + 一次渲染 + 批量事件（性能优化）
     if (batchCount) {
@@ -1871,7 +2169,7 @@
     // 合并历史：整体导入作为一步撤销
     if (this._historyIdx > baseIdx) {
       this._history = this._history.slice(0, baseIdx + 1);
-      this._history.push(JSON.stringify(this._stamps));
+      this._history.push(snapshotStamps(this._stamps));
       this._historyIdx = this._history.length - 1;
     }
 
@@ -1884,13 +2182,14 @@
     }
     var go = function () {
       self._paint();
-      self._emit('import', { count: self._stamps.length, users: self._users.length });
+      self._emit('import', { count: self._stamps.length, users: self._users.length, skipped: skipped });
       self._emit('change', self.getSelection());
     };
     if (firstPage && firstPage !== this._pageNumber && this._pdfMode === 'pdfjs' && this._pdf) {
       await this.gotoPage(firstPage);
     }
     go();
+    if (failure) throw self._fail(failure, 'import'); // 部分失败：已完成部分保留，同时上报
     return;
   };
 
@@ -2062,13 +2361,17 @@
 
   /** 记录当前签章状态到历史栈（**变更后**调用，push 新状态） */
   PdfStampPicker.prototype._pushHistory = function () {
-    var snapshot = JSON.stringify(this._stamps);
+    // ★ 用 snapshotStamps 而非 JSON.stringify：后者会把每个签章点的 base64 章图
+    //   完整复制进每一条历史（上限 50 条），带图签章多时内存成倍放大。
+    //   快照只浅拷贝标量，image 对象按引用共享（库内 image 只读，安全）。
+    var snapshot = snapshotStamps(this._stamps);
     // 若当前不在栈顶（已 undo 过），丢弃 redo 分支
     if (this._historyIdx < this._history.length - 1) {
       this._history = this._history.slice(0, this._historyIdx + 1);
     }
     this._history.push(snapshot);
-    if (this._history.length > 51) this._history.shift(); // 上限 50 步 + 初始
+    var limit = clamp(this._options.historyLimit || 50, 1, 500);
+    if (this._history.length > limit + 1) this._history.shift(); // 上限 N 步 + 初始
     this._historyIdx = this._history.length - 1;
   };
 
@@ -2090,8 +2393,9 @@
 
   PdfStampPicker.prototype._restoreFromHistory = function () {
     try {
-      var snap = JSON.parse(this._history[this._historyIdx]);
-      this._stamps = snap || [];
+      // ★ 从快照再复制一层：历史里的对象必须保持只读，不能被 _stamps 后续修改污染
+      var snap = this._history[this._historyIdx];
+      this._stamps = snap ? snapshotStamps(snap) : [];
     } catch (e) { return; }
     // 恢复后：活动签章若不存在则清空；存在则同步屏幕选区（防止活动章绘制位置错乱）
     if (this._activeId && !this._stamps.some(function (st) { return st.id === this._activeId; }, this)) {
@@ -3002,11 +3306,17 @@
   /* ---------------- 销毁 ---------------- */
 
   PdfStampPicker.prototype.destroy = function () {
+    if (this._destroyed) return;             // 幂等：重复调用安全
     this._destroyed = true;
+    // ★ H1：令牌自增 → 所有在途的加载/渲染/哈希补算链立即失效
+    this._loadToken++;
+    if (this._loadTimer) { clearTimeout(this._loadTimer); this._loadTimer = 0; }
     if (this._raf) cancelAnimationFrame(this._raf);
     if (this._resizeRaf) cancelAnimationFrame(this._resizeRaf);
+    if (this._pinchRaf) cancelAnimationFrame(this._pinchRaf);
+    this._raf = 0; this._resizeRaf = 0; this._pinchRaf = 0;
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
-    if (!this._ro) window.removeEventListener('resize', this._handlers.resize);
+    if (this._handlers && window.removeEventListener) window.removeEventListener('resize', this._handlers.resize);
     // 显式解绑事件监听（防 destroy 后仍持有实例引用时泄漏）
     if (this._overlay && this._handlers) {
       this._overlay.removeEventListener('pointerdown', this._handlers.down);
@@ -3021,23 +3331,36 @@
     // 中止未完成的加载
     if (this._abortCtrl) { try { this._abortCtrl.abort(); } catch (e) { /* ignore */ } this._abortCtrl = null; }
     // 释放 pdf.js 文档资源
-    if (this._pdf && this._pdf.destroy) { try { this._pdf.destroy(); } catch (e) { /* ignore */ } }
+    this._discardDoc(this._pdf);
     this._pdf = null;
     this._ptrs = null;
     this._pinch = null;
-    if (this._pinchRaf) cancelAnimationFrame(this._pinchRaf);
-    this._pinchRaf = 0;
+    this._drag = null;
     // 释放兼容 worker 的 blob URL —— 不再 revoke：worker blob 已全局共享（_sharedWorkerBlob），
     // 跨实例复用，若随实例 destroy 而 revoke 会导致 pdfjs.GlobalWorkerOptions.workerSrc 悬空、后续实例加载失败
     this._compatWorkerUrl = null;
-    // 释放缓存引用（实例被外部持有时也能被 GC 回收）
+    // ★ H2-3：统一释放全部大对象/状态引用（实例被外部持有时也能尽快被 GC 回收）
     this._imgCache = null;
     this._pdfBytes = null;
+    this._pdfBytesRef = null;
     this._pdfHash = null;
     this._pdfHashPromise = null;
     this._pdfHashPending = null;
-    if (this._root && this._root.parentNode) this._root.parentNode.removeChild(this._root);
+    this._stamps = [];
+    this._history = [];
+    this._historyIdx = 0;
+    this._users = [];
+    this._currentUserId = null;
+    this._stampImg = null;
     this._listeners = {};
+    // 解绑并释放 DOM 引用
+    if (this._root && this._root.parentNode) this._root.parentNode.removeChild(this._root);
+    this._root = null;
+    this._overlay = null;
+    this._pageEl = null;
+    this._canvas = null;
+    this._pdfCanvas = null;
+    this._listEl = null;
   };
 
   /* ====================== 弹窗模式 ====================== */
@@ -3199,6 +3522,47 @@
 
   function isPdfjsProxy(src) {
     return src && typeof src.getPage === 'function' && typeof src.numPages === 'number';
+  }
+
+  /**
+   * 历史快照工具：签章数组 → 可安全存放的快照。
+   *
+   * 只逐字段浅拷贝【标量】，`image` 对象按【引用】共享 —— 因为库内 `stamp.image`
+   * 是只读的（从不原地修改，只会整体替换），所以 50 条历史不会各存一份 base64 图。
+   *
+   * 旧实现用 `JSON.stringify(this._stamps)` 做快照：每个签章点若含 base64 章图
+   * （dataURL 动辄数十~数百 KB），50 条历史 = 50 份完整副本，内存成倍放大。
+   * 现在历史内存只与"签章数 × 标量大小"相关，与图片大小无关。
+   */
+  function snapshotStamps(stamps) {
+    var out = [];
+    for (var i = 0; i < stamps.length; i++) {
+      var s = stamps[i];
+      if (!s || typeof s !== 'object') { out.push(s); continue; }
+      var c = {};
+      for (var k in s) {
+        if (Object.prototype.hasOwnProperty.call(s, k)) c[k] = s[k];
+      }
+      out.push(c);
+    }
+    return out;
+  }
+
+  /**
+   * 构造"加载已被取代"的中止错误。
+   * 语义与 fetch 的 AbortController 一致：并发 load() 时，旧调用会以 AbortError 结束，
+   * 调用方应忽略 name === 'AbortError' 的失败（这是预期行为，不是故障）。
+   */
+  function supersededError() {
+    var e = new Error('[PdfStampPicker] 加载已被后续调用取代');
+    e.name = 'AbortError';
+    e.superseded = true;
+    return e;
+  }
+
+  /** 判断是否中止/取代类错误（预期内，不应派发 error 事件、不应视为失败） */
+  function isAbortError(err) {
+    return !!(err && (err.name === 'AbortError' || err.superseded || /已中止|已取代/.test(err.message || '')));
   }
 
   /* ---------------------------------------------------------------------
@@ -3546,10 +3910,14 @@
       generatedAt: new Date().toISOString()
     };
     // PDF 文件哈希（防篡改/文件指纹；SHA-256）
+    // hashStatus 明确标注状态，避免"hash 字段凭空消失、不知是漏算还是不支持"：
+    //   ready=已就绪 · pending=计算中（纯 URL 补算场景，可用 getHash()/hashready 取）
+    //   unavailable=本场景无法计算（纯 URL 未开 hashUrl，无字节可用）
     if (doc.hash) {
       docOut.hash = doc.hash;
       docOut.hashAlgorithm = 'SHA-256';
     }
+    docOut.hashStatus = doc.hashStatus || (doc.hash ? 'ready' : 'unavailable');
     return {
       document: docOut,
       users: userList.map(function (u) {
@@ -3587,15 +3955,23 @@
   function buildFlatJSON(doc, stamps, users) {
     var userMap = {};
     (users || []).forEach(function (u) { userMap[u.id] = { id: u.id, name: u.name, color: u.color }; });
+    // ★ 与 toJSON 保持一致：扁平版同样输出完整哈希信息（hash / hashAlgorithm / hashStatus），
+    //   避免两条导出路径数据不一致（旧实现扁平版完全没有 hash 字段）
+    var flatDoc = {
+      name: doc.docName || '',
+      pages: doc.totalPages,
+      currentPage: doc.currentPage,
+      pageSize: { width: round2(doc.width), height: round2(doc.height), unit: 'pt' },
+      rotation: doc.rotation || 0,
+      generatedAt: new Date().toISOString(),
+      hashStatus: doc.hashStatus || (doc.hash ? 'ready' : 'unavailable')
+    };
+    if (doc.hash) {
+      flatDoc.hash = doc.hash;
+      flatDoc.hashAlgorithm = 'SHA-256';
+    }
     return {
-      document: {
-        name: doc.docName || '',
-        pages: doc.totalPages,
-        currentPage: doc.currentPage,
-        pageSize: { width: round2(doc.width), height: round2(doc.height), unit: 'pt' },
-        rotation: doc.rotation || 0,
-        generatedAt: new Date().toISOString()
-      },
+      document: flatDoc,
       stamps: (stamps || []).map(function (st) {
         var u = userMap[st.userId] || null;
         var out = {

@@ -21,6 +21,27 @@ window.__modalResolve = null;   // 用于手动取消当前弹框
 
 // 记录 fetch 次数（patch 原生 fetch，观察 worker 是否重复 fetch）
 window.__workerFetchCount = 0;
+window.__renderProbe = {};      // 每次打开的渲染探针结果
+
+// 判定 canvas 是否画出内容：非全透明且非单一底色
+function probeCanvas(c) {
+  if (!c || !c.width || !c.height) return '无 canvas';
+  try {
+    var ctx = c.getContext('2d');
+    var w = c.width, h = c.height;
+    var d = ctx.getImageData(0, 0, w, Math.min(h, 400)).data;
+    var opaque = 0, seen = {};
+    for (var i = 0; i < d.length; i += 4) {
+      if (d[i + 3] > 8) {
+        opaque++;
+        seen[(d[i] >> 4) + ',' + (d[i + 1] >> 4) + ',' + (d[i + 2] >> 4)] = 1;
+      }
+    }
+    var colors = Object.keys(seen).length;
+    return '尺寸=' + w + 'x' + h + ' 不透明像素=' + opaque + ' 颜色簇=' + colors +
+      (opaque > 1000 && colors > 1 ? ' → 已渲染 ✅' : ' → 疑似空白 ❌');
+  } catch (e) { return '探针异常：' + e.message; }
+}
 var __origFetch = window.fetch;
 window.fetch = function (input, init) {
   var url = String(input);
@@ -53,13 +74,26 @@ function openModalOnce(label) {
     if (closeBtn) { closeBtn.click(); window.__log('  [操作] 已点取消关闭弹框'); }
   }, 3500);
 
+  // 2.6 秒时检查弹框内 canvas 是否真的画出了 PDF（非空白）——防止"能打开但加载不出"
+  setTimeout(function () {
+    var canvases = document.querySelectorAll('.psp-modal-mask canvas');
+    var best = null, bestArea = 0;
+    for (var i = 0; i < canvases.length; i++) {
+      var c = canvases[i];
+      var area = (c.width || 0) * (c.height || 0);
+      if (area > bestArea) { bestArea = area; best = c; }
+    }
+    window.__renderProbe[label] = probeCanvas(best);
+    window.__log('  [渲染探针] ' + window.__renderProbe[label]);
+  }, 2600);
+
   return p.then(function (json) {
     window.__log(label + ' 结束：' + (json ? ('确认 ' + json.users.length + ' 个用户') : '已取消'));
   });
 }
 </script>
 
-<script src="../pdf-stamp-picker.js"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.0"></script>
 <script>
 window.__log('库已加载，version = ' + (PdfStampPicker && PdfStampPicker.version));
 
@@ -83,7 +117,11 @@ setTimeout(function () {
   window.__log('\n===== 结果汇总 =====');
   window.__log('worker fetch 总次数 = ' + window.__workerFetchCount + '（理想值：1，复用缓存则始终为 1）');
   window.__log('弹框 DOM 残留 = ' + (document.querySelector('.psp-modal-mask') ? '有 ❌' : '无 ✅'));
-  document.title = window.__workerFetchCount <= 1 ? 'PASS' : 'FAIL';
+  var probes = Object.keys(window.__renderProbe).map(function (k) { return k + ': ' + window.__renderProbe[k]; });
+  window.__log('渲染探针：\n  ' + probes.join('\n  '));
+  var allRendered = probes.length === 3 && probes.every(function (s) { return s.indexOf('已渲染') >= 0; });
+  window.__log('三次打开均渲染出 PDF = ' + (allRendered ? '是 ✅' : '否 ❌'));
+  document.title = (window.__workerFetchCount <= 1 && allRendered) ? 'PASS' : 'FAIL';
 }, 15000);
 </script>
 </body>

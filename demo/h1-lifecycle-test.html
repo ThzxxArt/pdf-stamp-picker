@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>H1 加载生命周期回归测试（并发/串档/中止/失败上报）</title>
+<style>
+body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
+#log div{padding:2px 0}
+.ok{color:#4ade80}.bad{color:#f87171}.info{color:#93c5fd}.sum{margin-top:10px;font-weight:bold}
+#stage{position:absolute;left:-9999px;width:400px;height:600px}
+</style>
+</head>
+<body>
+<h2>PdfStampPicker H1 加载生命周期回归测试</h2>
+<p class="info" id="ver"></p>
+<div id="log"></div>
+<div id="stage"></div>
+<script src="../pdf-stamp-picker.js?v=4.9.0"></script>
+<script>
+var log = document.getElementById('log');
+function say(msg, cls) {
+  var d = document.createElement('div');
+  d.className = cls || '';
+  d.textContent = msg;
+  log.appendChild(d);
+}
+function stage() {
+  var el = document.createElement('div');
+  el.style.cssText = 'width:400px;height:600px';
+  document.getElementById('stage').appendChild(el);
+  return el;
+}
+function mk(opts) { return new PdfStampPicker(stage(), opts || {}); }
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+var results = [];
+function record(name, pass, detail) {
+  results.push({ name: name, pass: pass });
+  say((pass ? '✅ ' : '❌ ') + name + ' — ' + detail, pass ? 'ok' : 'bad');
+}
+function isAbort(e) { return !!(e && (e.name === 'AbortError' || e.superseded)); }
+
+/* 用真实 pdf.js，但给 getDocument 注入可控延迟（window.__delay 毫秒） */
+function installDelayMock() {
+  var lib = window.pdfjsLib;
+  var real = lib.getDocument;
+  window.__delay = 0;
+  lib.getDocument = function (cfg) {
+    var d = window.__delay || 0;
+    if (!d) return real.call(lib, cfg);
+    return {
+      promise: new Promise(function (res, rej) {
+        setTimeout(function () { real.call(lib, cfg).promise.then(res, rej); }, d);
+      })
+    };
+  };
+}
+
+/* ① D3：并发 load —— 慢 A 被快 B 取代，状态必须是 B 的 */
+async function t1_concurrent() {
+  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  window.__delay = 600;
+  var pA = p.load('test.pdf');                  // 3 页
+  window.__delay = 0;
+  await sleep(50);
+  var pB = p.load('eight-page.pdf');            // 8 页
+  var r = await Promise.allSettled([pA, pB]);
+  var aAborted = r[0].status === 'rejected' && isAbort(r[0].reason);
+  var bOk = r[1].status === 'fulfilled';
+  record('① 并发 load：旧调用以 AbortError 结束',
+    aAborted, 'A=' + r[0].status + (aAborted ? '(AbortError)' : '(' + (r[0].reason && r[0].reason.message) + ')'));
+  record('① 并发 load：实例状态属于新文档（无混合状态）',
+    bOk && p._totalPages === 8 && p._pageNumber === 1 && /eight-page/.test(p._docName || ''),
+    'pages=' + p._totalPages + ' name=' + p._docName + ' pageNumber=' + p._pageNumber);
+  window.__delay = 0;
+  p.destroy();
+}
+
+/* ② D2：跨文档哈希串档 */
+async function t2_hash_carryover() {
+  var p = mk();
+  await p.load({ url: 'test.pdf', headers: { 'X-T': '1' } });
+  var hA = await p.getHash();
+  await p.load({ url: 'eight-page.pdf', headers: { 'X-T': '1' } });
+  var hB = await p.getHash();
+  var ref = mk();
+  await ref.load({ url: 'eight-page.pdf', headers: { 'X-T': '1' } });
+  var hBRef = await ref.getHash();
+  record('② 换文档后哈希随之更新（不再是 A 的哈希）',
+    !!hA && !!hB && hB !== hA && hB === hBRef,
+    'A=' + (hA || 'NULL').slice(0, 12) + '… B=' + (hB || 'NULL').slice(0, 12) + '… ref=' + (hBRef || 'NULL').slice(0, 12) + '…');
+  var j = p.toJSON();
+  record('② toJSON 的 hash 与实例一致',
+    j.document.hash === hB && j.document.hashStatus === 'ready', 'hashStatus=' + j.document.hashStatus);
+  p.destroy(); ref.destroy();
+}
+
+/* ③ D2'：切到"无字节可用"的来源，旧哈希必须被清掉 */
+async function t3_hash_cleared() {
+  var p = mk();
+  await p.load({ url: 'test.pdf', headers: { 'X-T': '1' } });
+  var hA = await p.getHash();
+  await p.load('eight-page.pdf');               // 纯 URL 流式：无字节 → 算不了哈希
+  var h = await p.getHash();
+  var j = p.toJSON();
+  record('③ 换到无字节来源后哈希被清空（不残留旧值）',
+    hA && h === null && j.document.hash === undefined && j.document.hashStatus === 'unavailable',
+    'hash=' + h + ' hashStatus=' + j.document.hashStatus);
+  p.destroy();
+}
+
+/* ④ D4：hashUrl 补算结果不得跨越文档回写 */
+async function t4_stale_hashurl() {
+  var p = mk({ hashUrl: true });
+  var readyHashes = [];
+  p.on('hashready', function (e) { readyHashes.push(e.hash); });
+  var hA = null;
+  var ref = mk();
+  await ref.load({ url: 'test.pdf', headers: { 'X-T': '1' } });   // 先拿到 A 的哈希做对照
+  hA = await ref.getHash();
+  ref.destroy();
+
+  window.__delay = 400;                          // 让 A 的解析慢一点，制造"补算与切换重叠"
+  var pA = p.load('test.pdf').catch(function () {});
+  window.__delay = 0;
+  await sleep(30);
+  await p.load({ url: 'eight-page.pdf', headers: { 'X-T': '1' } });
+  var hB = await p.getHash();
+  await sleep(1500);                             // 等 A 的后台补算彻底落地（若未被令牌拦截）
+  var leaked = readyHashes.indexOf(hA) >= 0;
+  record('④ 陈旧 hashUrl 补算不回写、不误发 hashready',
+    !leaked && p._pdfHash === hB && hB !== hA,
+    'hashready次数=' + readyHashes.length + ' 泄漏A=' + leaked + ' 当前=' + (p._pdfHash || 'NULL').slice(0, 12) + '…');
+  window.__delay = 0;
+  p.destroy();
+}
+
+/* ⑤ D5：程序化加载失败必须派发 error 事件（带 stage） */
+async function t5_error_event() {
+  var p = mk();
+  var got = null;
+  p.on('error', function (e) { got = e; });
+  var err = null;
+  try { await p.load('__not_exist__.pdf'); } catch (e) { err = e; }
+  record('⑤ 加载失败派发 error 事件且带 stage',
+    !!err && !!got && got.stage === 'parse' && !!got.message,
+    'err=' + (err && err.message) + ' | stage=' + (got && got.stage));
+  p.destroy();
+}
+
+/* ⑥ abort()：中止在途加载 → AbortError，且不算失败（无 error 事件） */
+async function t6_abort() {
+  var p = mk();
+  var errors = 0;
+  p.on('error', function () { errors++; });
+  window.__delay = 800;
+  var pr = p.load('eight-page.pdf');
+  window.__delay = 0;
+  await sleep(80);
+  p.abort();
+  var err = null;
+  try { await pr; } catch (e) { err = e; }
+  record('⑥ abort() 中止在途加载：AbortError 且不派发 error',
+    isAbort(err) && errors === 0, 'err=' + (err && err.name) + ' error事件=' + errors);
+  p.destroy();
+}
+
+/* ⑦ destroy()：加载在途时销毁 → 不派发 error、无未捕获异常 */
+async function t7_destroy_inflight() {
+  var p = mk();
+  var errors = 0;
+  p.on('error', function () { errors++; });
+  window.__delay = 600;
+  var pr = p.load('eight-page.pdf').catch(function (e) { return e; });
+  window.__delay = 0;
+  await sleep(60);
+  p.destroy();
+  var err = await pr;                            // 不应抛出未捕获异常
+  await sleep(900);
+  record('⑦ destroy() 期间的加载链静默收敛（无 error 事件）',
+    errors === 0 && (err === undefined || isAbort(err)), 'error事件=' + errors + ' 结果=' + (err && (err.name || err.message)));
+}
+
+/* ⑧ 快速翻页：最终状态必须落在最后一页 */
+async function t8_rapid_page() {
+  var p = mk();
+  await p.load({ url: 'eight-page.pdf', headers: { 'X-T': '1' } });
+  var chain = p.gotoPage(2); await sleep(1); p.gotoPage(3); await sleep(1); var last = p.gotoPage(5);
+  await Promise.allSettled([chain, last]);
+  await sleep(300);
+  record('⑧ 快速翻页竞态：最终页码 = 最后一次请求',
+    p._pageNumber === 5 && p._page !== null && p._page.pageNumber === 5,
+    'pageNumber=' + p._pageNumber + ' 已渲染页=' + (p._page && p._page.pageNumber));
+  p.destroy();
+}
+
+/* ⑨ D8：importJSON 中途失败也必须还原 _currentUserId + 上报 + 记录 skipped */
+async function t9_import_restore() {
+  var p = mk({ users: [{ id: 'u1', name: '甲方' }, { id: 'u2', name: '乙方' }] });
+  await p.load({ url: 'test.pdf', headers: { 'X-T': '1' } });
+  var saved = p._currentUserId;
+  var got = null, imported = null;
+  p.on('error', function (e) { got = e; });
+  p.on('import', function (e) { imported = e; });
+
+  var origAdd = p.addStamp;
+  var n = 0;
+  p.addStamp = function (o) { n++; if (n === 3) throw new Error('模拟第3条导入失败'); return origAdd.call(p, o); };
+
+  var err = null;
+  try {
+    await p.importJSON({
+      stamps: [
+        { x: 'nope', y: 1, page: 1 },            // 坏条目：x 非数字 → 应计入 skipped
+        { x: 10, y: 10, page: 1, userId: 'u2' },
+        { x: 20, y: 20, page: 1, userId: 'u1' },
+        { x: 30, y: 30, page: 1, userId: 'u2' },
+        { x: 40, y: 40, page: 1, userId: 'u1' }
+      ]
+    });
+  } catch (e) { err = e; }
+  record('⑨ importJSON 中途失败：_currentUserId 已还原 + 已上报',
+    p._currentUserId === saved && !!got && got.stage === 'import' && !!err,
+    'userId=' + p._currentUserId + ' (原=' + saved + ') stage=' + (got && got.stage) + ' 已落地=' + p._stamps.length);
+  record('⑨ importJSON 坏条目计数不再静默丢弃',
+    !!imported && imported.skipped === 1, 'skipped=' + (imported && imported.skipped));
+  p.destroy();
+}
+
+/* ⑩ H2：历史快照共享 image 引用（不再按 base64 复制 N 份） */
+async function t10_history_memory() {
+  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  await p.load({ url: 'test.pdf', headers: { 'X-T': '1' } });
+  var img = { src: 'data:image/png;base64,' + new Array(4096).join('A'), name: '章', width: 10, height: 10 };
+  p.addStamp({ x: 10, y: 20, page: 1, image: img });
+  var snap = p._history[p._historyIdx];
+  var shared = snap && snap[0] && snap[0].image === img;
+  // 快照隔离性：改 _stamps 的标量不得影响历史
+  p._stamps[0].x = 999;
+  var histX = p._history[p._historyIdx][0].x;
+  record('⑩ 历史快照共享 image 引用（内存不随图片放大）', shared, 'image 同引用=' + shared);
+  record('⑩ 历史快照标量仍相互隔离', histX === 10, '历史 x=' + histX + '（改实例后仍应为 10）');
+  p.destroy();
+}
+
+/* ⑪ 中止/失败后不留"半成品文档"状态（名字显示了、页数却是空的） */
+async function t11_no_half_loaded_residue() {
+  var fresh = mk();
+  var freshDoc = fresh.toJSON().document;
+
+  // a) 加载中 abort
+  var p = mk();
+  window.__delay = 800;
+  var pr = p.load('eight-page.pdf');
+  window.__delay = 0;
+  await sleep(80);
+  p.abort();
+  try { await pr; } catch (e) { /* 预期 AbortError */ }
+  var d1 = p.toJSON().document;
+  record('⑪a 中止后回到"未加载"状态（名字/页数/哈希）',
+    d1.name === freshDoc.name && d1.pages === freshDoc.pages && !d1.hash && d1.hashStatus === freshDoc.hashStatus,
+    'name=' + JSON.stringify(d1.name) + ' pages=' + d1.pages + ' hash=' + d1.hash + ' status=' + d1.hashStatus +
+    ' | 基准 name=' + JSON.stringify(freshDoc.name) + ' pages=' + freshDoc.pages);
+  p.destroy();
+
+  // b) 加载失败（404）
+  var q = mk();
+  q.on('error', function () {});
+  try { await q.load('__not_exist__.pdf'); } catch (e) { /* 预期失败 */ }
+  var d2 = q.toJSON().document;
+  record('⑪b 加载失败后同样不留半成品状态',
+    d2.name === freshDoc.name && d2.pages === freshDoc.pages,
+    'name=' + JSON.stringify(d2.name) + ' pages=' + d2.pages);
+  q.destroy();
+  fresh.destroy();
+}
+
+(async function run() {
+  document.getElementById('ver').textContent = '库版本 ' + PdfStampPicker.version;
+  try {
+    await PdfStampPicker.loadPdfJsAuto();
+    installDelayMock();
+    say('pdf.js 已就绪，延迟注入器已安装', 'info');
+  } catch (e) {
+    say('pdf.js 加载失败：' + e.message, 'bad');
+  }
+  var cases = [t1_concurrent, t2_hash_carryover, t3_hash_cleared, t4_stale_hashurl,
+               t5_error_event, t6_abort, t7_destroy_inflight, t8_rapid_page,
+               t9_import_restore, t10_history_memory, t11_no_half_loaded_residue];
+  for (var i = 0; i < cases.length; i++) {
+    try { await cases[i](); } catch (e) { record(cases[i].name, false, '用例抛错: ' + e.message); }
+  }
+  var pass = results.filter(function (r) { return r.pass; }).length;
+  var d = document.createElement('div');
+  d.className = 'sum ' + (pass === results.length ? 'ok' : 'bad');
+  d.textContent = '=== H1 回归：' + pass + '/' + results.length + ' 通过 ===';
+  log.appendChild(d);
+  document.title = 'H1 ' + pass + '/' + results.length;
+})();
+</script>
+</body>
+</html>
