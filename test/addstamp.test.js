@@ -19,9 +19,19 @@ const Picker = require(path.join(__dirname, '..', 'pdf-stamp-picker.js'));
 let cases = 0;
 const ok = (name) => { cases++; void name; };
 
-/** 构造最小实例：真实尺寸/添加逻辑 + DOM 副作用桩 */
+/**
+ * 构造最小实例：**从真实原型继承**（真实尺寸/添加逻辑全部可用）+ DOM 副作用桩。
+ *
+ * ★ 不要"手工列举要复制的原型方法"。本测试原先就是这样写的（只抄了 addStamp /
+ *   _defaultStampSize / _stampDisplaySize / _stampRatio 四个），结果本次给库新增内部方法
+ *   `_stampSizePdf()` 后 mock 没同步 → **修复版与变异版都在 addStamp 里 TypeError**，
+ *   红得毫无信息量：看起来像被测库崩了，实际是测试自己的替身缺胳膊少腿。
+ *   改为 Object.create(Picker.prototype) 后，库新增/改名任何内部方法都自动可用，
+ *   需要维护的只剩"哪些副作用要打桩"这一件事 —— 而那正是本测试唯一该关心的。
+ */
 function mkInst(opts) {
-  const inst = {
+  const inst = Object.create(Picker.prototype);
+  Object.assign(inst, {
     _stamps: [],
     _activeId: null,
     _currentUserId: 'u1',
@@ -29,20 +39,29 @@ function mkInst(opts) {
     _rotation: 0,
     _displayW: 595,
     _displayH: 842,
+    _sel: null,
     _stampImg: null,
     _options: Object.assign({ mode: 'stamp', stampSize: 120, stampMargin: 0, historyLimit: 50 }, opts || {}),
-    // 真实逻辑
-    addStamp: Picker.prototype.addStamp,
-    _defaultStampSize: Picker.prototype._defaultStampSize,
-    _stampDisplaySize: Picker.prototype._stampDisplaySize,
-    _stampRatio: Picker.prototype._stampRatio,
-    // 副作用桩（不参与尺寸语义）
+    // 副作用桩（不参与尺寸语义）—— 显式遮蔽原型上的真实实现
     _pushHistory() {}, _renderList() {}, _emit() {}, _checkOverlap() {},
     _paint() { this._paints = (this._paints || 0) + 1; },   // 桩：记录重绘次数
     _syncSelFromStamp(st) { this._synced = st.id; },   // 桩：记录"选区已同步"
     getSelection() { return null; }
-  };
+  });
   return inst;
+}
+
+/* 0. 替身自检：mock 必须真的继承库的原型（否则整个文件的红都是假的） */
+{
+  const p = mkInst();
+  assert.strictEqual(Object.getPrototypeOf(p), Picker.prototype,
+    'mkInst 必须基于 Picker.prototype 构造，不能是手工拼的对象字面量');
+  assert.strictEqual(typeof p._stampSizePdf, 'function',
+    'mock 必须能拿到库的内部尺寸真源方法（_stampSizePdf 缺失即为替身过期）');
+  const sz = p._stampSizePdf();
+  assert.ok(sz && sz.w === 120 && sz.h === 120,
+    '_stampSizePdf() 应为 {w:120,h:120}（无章图时比例 1:1），实际 ' + JSON.stringify(sz));
+  ok();
 }
 
 /* 1. ★ 核心回归：stamp 模式下缺省尺寸必须补成可用尺寸，而不是 0×0 */
@@ -159,17 +178,54 @@ function mkInst(opts) {
   ok();
 }
 
-/* 10. 与"点击放置"产物一致：缺省尺寸 == _stampDisplaySize() */
+/* 10. 缺省尺寸 = stampSize（PDF pt 物理尺寸），且【不随显示缩放变化】
+   ★ 这一组曾经是**假通过**：旧写法 `st.width === p._stampDisplaySize().w`，
+     而 addStamp 的缺省正是从 _stampDisplaySize() 取来的 → f() === f() 同义反复，
+     永不可能失败；于是"与点击放置一致"这个声明在缩放≠1 时其实是错的（窄屏下
+     章能大到页宽 240%），却一路绿灯过了 v4.9.2/v4.9.3 的回归。
+     现在改为断言**绝对物理尺寸**：期望值来自常量 88（与实现无共享来源），
+     下面再用反例守卫证明它不随 _cssScale 漂移。 */
 {
   const p = mkInst({ stampSize: 88 });
+  const ratio = p._stampRatio();
+  const expH = ratio ? 88 / ratio : 88;
   const st = p.addStamp({ x: 0, y: 0 });
-  const d = p._stampDisplaySize();
-  assert.strictEqual(st.width, d.w);
-  assert.strictEqual(st.height, d.h);
+  assert.strictEqual(st.width, 88, '缺省宽应等于 stampSize 本身（PDF pt）');
+  assert.strictEqual(st.height, expH);
+  // 反例守卫：显示缩放变了，落库物理尺寸必须纹丝不动（旧实现会跟着变）
+  p._cssScale = 0.084;
+  assert.strictEqual(p.addStamp({ x: 0, y: 0 }).width, 88, '落库尺寸不得随显示缩放变化');
+  p._cssScale = 2.5;
+  assert.strictEqual(p.addStamp({ x: 0, y: 0 }).width, 88);
+  ok();
+}
+
+/* 10b. ★ 显示侧契约（Node 也能钉死，不必等浏览器）：
+ *       _stampDisplaySize() 必须 = 物理尺寸 × _cssScale —— 点击放置路径就是拿它当
+ *       "屏幕上要摆多大的矩形"，再经 screenToPdf(÷cssScale) 反算回 PDF 单位。
+ *       少了这个乘法，点击放置出的章就变成 stampSize/cssScale（窄屏下可到页宽 240%），
+ *       而 addStamp 路径不受影响 → 两路分叉。旧回归之所以漏掉，是因为只断言了显示尺寸，
+ *       从没断言它与 cssScale 的**比例关系**。 */
+{
+  const p = mkInst({ stampSize: 88 });
+  [0.084, 0.966, 1, 2.5].forEach((k) => {
+    p._cssScale = k;
+    const d = p._stampDisplaySize();
+    assert.ok(Math.abs(d.w - 88 * k) < 1e-9,
+      '显示宽应为 88×' + k + '=' + (88 * k) + '，实际 ' + d.w);
+    assert.ok(Math.abs(d.h - 88 * k) < 1e-9, '显示高同理（无章图 1:1）');
+  });
+  // 未布局（cssScale=0）必须退化为 1×，不能返回 0 尺寸矩形
+  p._cssScale = 0;
+  assert.strictEqual(p._stampDisplaySize().w, 88, '未布局时不得退化成 0 尺寸');
+  // 两路一致的关系式：显示尺寸 ÷ cssScale === 落库尺寸（浮点用容差比）
+  p._cssScale = 0.084;
+  assert.ok(Math.abs(p._stampDisplaySize().w / 0.084 - p.addStamp({ x: 0, y: 0 }).width) < 1e-9,
+    '点击路径（显示÷cssScale）必须还原成与 addStamp 相同的物理尺寸');
   ok();
 }
 
 console.log('=== addStamp 语义单测通过：' + cases + ' 组断言'
-  + '（缺省补尺寸 / 随 stampSize+比例 / point 模式 0×0 / 显式 0 尊重 / 显式值保留 /'
-  + ' 非法值回落 / 宽高独立 / 其它字段不受影响 / 缺 x,y 抛错 / 与点击放置一致 /'
-  + ' 选区同步（同页同步 / 跨页不同步 / 未布局不同步） / 非批量必重绘）===');
+  + '（替身自检 / 缺省补尺寸 / 随 stampSize+比例 / point 模式 0×0 / 显式 0 尊重 / 显式值保留 /'
+  + ' 非法值回落 / 宽高独立 / 其它字段不受影响 / 缺 x,y 抛错 / 缺省=stampSize 且不随缩放漂移 /'
+  + ' 显示尺寸=物理×cssScale（含未布局退化）/ 选区同步（同页同步 / 跨页不同步 / 未布局不同步） / 非批量必重绘）===');

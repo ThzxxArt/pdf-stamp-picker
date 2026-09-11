@@ -5,8 +5,8 @@
 <title>addStamp 缺省尺寸语义回归测试（0×0 空章陷阱）</title>
 <link rel="stylesheet" href="../vendor/pdf.min.css">
 <script src="../vendor/pdf.min.js"></script>
-<script src="test-harness.js?v=4.9.3"></script>
-<script src="../pdf-stamp-picker.js?v=4.9.3"></script>
+<script src="test-harness.js?v=4.9.4"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.4"></script>
 <style>
   body { font: 13px/1.6 -apple-system, "PingFang SC", sans-serif; margin: 12px; color: #e6e6e6; background: #16181d; }
   h1 { font-size: 15px; }
@@ -76,7 +76,7 @@
 
   async function run() {
     __TEST.start();
-    __TEST.expect(16);   // ①5 + ②2 + ③2 + ④4 + ⑤3
+    __TEST.expect(20);   // ①5 + ②2 + ③2 + ④4 + ⑤3 + ⑥4
 
     /* ---------- ① 缺省尺寸：应补齐为可用的章尺寸，而不是 0 ---------- */
     section('① 缺省尺寸（默认 mode:stamp）');
@@ -164,6 +164,52 @@
     rec('⑤ 正常显式尺寸不受影响',
       st7.width === 40 && st7.height === 20, 'w=' + st7.width + ' h=' + st7.height);
     p5.destroy();
+
+    /* ---------- ⑥ 缺省尺寸"两路一致"（D14 回归）----------
+       两条路径的单位曾经不一致：addStamp 直接把 _stampDisplaySize() 当 PDF 单位落库，
+       而画布点击路径会把显示矩形经 screenToPdf 换算（÷cssScale）→
+       **只有 cssScale===1 时两者才相等**，缩放一变就分叉（窄屏容器实测章宽达页宽 240%）。
+       这一条必须在浏览器 + 非 1 缩放下测：Node 没有布局，cssScale 恒为 1，测了也发现不了。 */
+    section('⑥ 缺省尺寸两路一致（跨容器宽度/缩放 · D14 回归）');
+    var widths6 = [900, 480, 360];       // → cssScale ≈ 0.97 / 0.26 / 0.08，均非 1
+    var apiW = [], clickW = [], scales = [], dispW = [];
+    for (var wi = 0; wi < widths6.length; wi++) {
+      var hv = document.createElement('div');
+      hv.style.cssText = 'position:fixed;left:-3000px;top:0;width:' + widths6[wi] + 'px;height:700px;';
+      document.body.appendChild(hv);
+      var pv = new PdfStampPicker(hv, { mode: 'stamp', controls: false, stampSize: 120 });
+      await pv.load('test.pdf');
+      await sleep(140);                                    // 等布局/缩放稳定
+      apiW.push(pv.addStamp({ x: 50, y: 700 }).width);     // 路径 A：API 缺省（角落，避免与点击落点重叠）
+      var ov6 = pv._overlay, r6 = ov6.getBoundingClientRect();
+      var cx6 = r6.left + r6.width * 0.5, cy6 = r6.top + r6.height * 0.5;
+      ['pointerdown', 'pointerup'].forEach(function (t) {
+        ov6.dispatchEvent(new PointerEvent(t, {
+          bubbles: true, cancelable: true, clientX: cx6, clientY: cy6,
+          pointerId: 1, isPrimary: true, button: 0, buttons: t === 'pointerdown' ? 1 : 0
+        }));
+      });
+      await sleep(80);
+      var sts6 = pv.toFlatJSON().stamps;
+      clickW.push(sts6[sts6.length - 1].width);            // 路径 B：画布点击放置
+      scales.push(pv._cssScale);
+      dispW.push(pv._stampDisplaySize().w);
+      pv.destroy();
+    }
+    rec('⑥-1 三种容器宽度下 addStamp 缺省都 = stampSize(120pt)',
+      apiW.every(function (w) { return Math.abs(w - 120) < 0.01; }),
+      '实际=' + apiW.map(function (w) { return w.toFixed(2); }).join(' / '));
+    rec('⑥-2 三种缩放下画布点击放置的章宽也都 = 120pt（旧实现随缩放漂移）',
+      clickW.every(function (w) { return Math.abs(w - 120) < 0.01; }),
+      '缩放=' + scales.map(function (s) { return s.toFixed(3); }).join(' / ')
+      + ' → 章宽=' + clickW.map(function (w) { return w.toFixed(2); }).join(' / '));
+    rec('⑥-3 两路物理尺寸完全一致（逐对比值 = 1）',
+      clickW.every(function (w, i) { return Math.abs(w - apiW[i]) < 0.01; }),
+      '差值=' + clickW.map(function (w, i) { return (w - apiW[i]).toFixed(3); }).join(' / '));
+    rec('⑥-4 显示尺寸 = PDF 尺寸 × cssScale（屏幕随缩放、落库不随）',
+      dispW.every(function (w, i) { return Math.abs(w - 120 * scales[i]) < 0.05; }),
+      '屏幕=' + dispW.map(function (w) { return w.toFixed(1); }).join(' / ')
+      + 'px vs 120×scale');
 
     __TEST.finish();
     say(__TEST.summary().status === 'done'

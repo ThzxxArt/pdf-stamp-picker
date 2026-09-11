@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v4.9.3
+ * PdfStampPicker v4.9.4
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.9.3';
+  var VERSION = '4.9.4';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -1970,11 +1970,26 @@
     return (this._stampImg && this._stampImg.h) ? this._stampImg.w / this._stampImg.h : 1;
   };
 
-  /** 预览/新放置的显示尺寸（按 stampSize 基准宽） */
-  PdfStampPicker.prototype._stampDisplaySize = function () {
+  /**
+   * 章尺寸的**唯一真源**：PDF 单位（pt），物理尺寸，与缩放/窗口宽度无关。
+   * `addStamp` 的缺省值、画布点击放置的落库值都源自这里 ——
+   * 两条路径因此在**任何缩放**下都相等，且章恒占页宽固定比例。
+   */
+  PdfStampPicker.prototype._stampSizePdf = function () {
     var ratio = this._stampRatio();
     var w = this._options.stampSize;
     return { w: w, h: ratio ? w / ratio : w };
+  };
+
+  /**
+   * 章在**当前显示空间**中的尺寸（屏幕 px = PDF 尺寸 × _cssScale）。
+   * 只给"在屏幕上摆一个章"的逻辑用（_stampRectAt 生成选区）；
+   * 该选区经 screenToPdf 反算回 PDF 单位后，必然还原成 _stampSizePdf()。
+   */
+  PdfStampPicker.prototype._stampDisplaySize = function () {
+    var s = this._stampSizePdf();
+    var k = this._cssScale > 0 ? this._cssScale : 1;   // 未布局时为 0 → 退化为 1，避免 0 尺寸
+    return { w: s.w * k, h: s.h * k };
   };
 
   /** 签章可活动范围（带 stampMargin 间距，不出边界） */
@@ -2373,7 +2388,12 @@
    */
   PdfStampPicker.prototype._defaultStampSize = function () {
     if (this._options.mode === 'point') return { w: 0, h: 0 };   // 锚点形态：0×0 即正确
-    return this._stampDisplaySize();                             // 与点击放置完全一致
+    /* ★ 必须返回 PDF 单位（_stampSizePdf），不是显示 px：
+       addStamp 的 width/height 是**直接落库**的 PDF 坐标，而点击路径会把
+       显示矩形经 screenToPdf 换算回 PDF 单位。旧实现返回 _stampDisplaySize()，
+       只有 cssScale===1 时两者才相等 —— 缩放/窗口一变两条路径就分叉
+       （实测容器 360px 时点一下得到 1428pt 的章 = 页宽 240%）。*/
+    return this._stampSizePdf();                                 // 与点击放置一致（任何缩放）
   };
 
   /**
@@ -2382,8 +2402,8 @@
    * 尺寸语义：`width`/`height` 只接受**有限且 ≥0 的数字**；
    *   · 显式 `0` 合法 → 坐标锚点形态（点选模式的数据原样保留）；
    *   · 缺省 / `undefined` / `null` / `NaN` / 负数 / 非数字 → 回落到 `_defaultStampSize()`
-   *     （point 模式 0×0；其余模式 = 当前章图按 `stampSize` 的显示尺寸，
-   *      与"在画布上点一下"得到的结果完全一致）。
+   *     （point 模式 0×0；其余模式 = `stampSize`（**PDF pt 物理尺寸**，缺省 120），
+   *      与"在画布上点一下"得到的结果完全一致——**任何缩放/窗口宽度下都相等**）。
    *   `x`,`y` 始终是矩形**左上角**（与 `getSelection()` / JSON 输出一致），不随缺省尺寸而改变含义。
    *
    * @param {{x:number,y:number,width?:number,height?:number,page?:number,userId?:string,note?:string,image?:object}} sel

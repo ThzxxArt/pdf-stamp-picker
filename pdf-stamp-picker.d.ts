@@ -50,7 +50,7 @@ export interface PdfStampPickerOptions {
   allowMulti?: boolean;
   /** 初始签章图片（可选；不配则内置公章按用户名生成） */
   stampImage?: string | File | HTMLCanvasElement | null;
-  /** 签章图显示基准宽度 px（默认 120） */
+  /** 签章图基准宽度 pt（PDF 物理单位，默认 120 ≈ 4.2cm；不随窗口宽度/显示缩放变化） */
   stampSize?: number;
   /** 签章距页面边界的最小间距 px（默认 12；0=紧贴边界） */
   stampMargin?: number;
@@ -240,7 +240,8 @@ export default class PdfStampPicker {
   /**
    * 程序化添加签章点（PDF 坐标）。`x`/`y` 为矩形左上角。
    * `width`/`height` 缺省（或非有限数）时回落到当前模式的默认尺寸：
-   * `mode:'point'` → 0×0 坐标锚点；其余模式 → 与画布点击放置一致的章尺寸（`stampSize` 基准宽）。
+   * `mode:'point'` → 0×0 坐标锚点；其余模式 → `stampSize`（PDF pt，默认 120）。
+   * 该缺省值与"在画布上点击放置"得到的**物理尺寸完全一致**（任何窗口宽度/缩放下都相等，v4.9.4 起）。
    * 显式传 `0,0` 仍表示坐标锚点。
    */
   addStamp(sel: { x: number; y: number; width?: number; height?: number; page?: number; userId?: string; note?: string }): StampJSON;
