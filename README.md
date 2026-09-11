@@ -39,7 +39,7 @@
 
 **数据输出**
 - 📦 **JSON 按用户分组**（`users[].stamps[]`），天然对应第三方签章接口模型
-- 🔐 **document.hash**：PDF SHA-256 文件指纹（Web Crypto 零依赖，防篡改/验签）
+- 🔐 **document.hash**：PDF SHA-256 文件指纹（Web Crypto 优先 + 库内纯 JS 兜底，零依赖，内网 HTTP 同样可用，防篡改/验签）
 - 🔄 **导入反显**（`importJSON`）+ 可选含图导出（`toJSON({ includeImage })`）
 
 **体验**
@@ -346,7 +346,24 @@ picker.setCurrentUser('c');           // 后续新增的签章归属丙方
 
 **要点**：
 - 每个签署方的签章点坐标归在自己的 `user` 下，用户信息在外层只出现一次
-- `document.hash`：PDF SHA-256 哈希（Web Crypto 计算，零依赖）；本地文件/字节/流接口加载时计算（静态 URL 原生流式加载时为 `null`，因无完整字节缓存）
+- `document.hash`：PDF SHA-256 哈希（小写 hex 64 位，零依赖）。**hash 为 null 时字段会从 JSON 中省略（不是输出 null）**，所以「JSON 里看不到 hash」= 该场景拿不到字节或无法计算。三种情况对照：
+
+  | 加载方式 | hash | 说明 |
+  |---|---|---|
+  | `File` / `ArrayBuffer` / `Uint8Array` | ✅ | 字节在手，直接算 |
+  | `{ url, headers }` / `{ url, method }`（文件流接口、自定义头） | ✅ | 库自己 fetch 流式取字节并缓存 |
+  | `load('a.pdf')` / `load({url:'a.pdf'})` 纯静态地址 | ❌ 无 | 走 pdf.js 原生流式（大文件/Range 友好），**无完整字节缓存** → 不输出 hash |
+
+  需要纯 URL 场景也出 hash（v4.8.27 起）：构造时开 `hashUrl: true`，库会在 PDF 展示后**后台补请求一次该地址**算哈希（不阻塞加载），完成后触发 `hashready` 事件；调用方可用 `picker.getHash()` 等待结果：
+
+  ```js
+  const picker = new PdfStampPicker('#stage', { hashUrl: true });
+  picker.on('hashready', ({ hash, hashAlgorithm }) => console.log('哈希就绪', hash));
+  await picker.load('https://intranet.example.com/a.pdf');   // PDF 立即可见
+  const hash = await picker.getHash();                       // 需要时再取（已就绪则立即返回）
+  ```
+
+  计算实现：优先 `crypto.subtle`（安全上下文最快）；**内网 HTTP（`http://192.168.x.x`）、`file://` 等【非安全上下文】下 `crypto.subtle` 不存在**，库会自动降级为**库内自带的纯 JS SHA-256**（v4.8.27 起；分块计算 + 让出主线程，大文件不卡 UI），结果与 Web Crypto/`sha256sum` 完全一致 —— 因此内网部署同样能拿到哈希，无需 HTTPS。
 - 签章点默认**不含图片**（轻量）；`toJSON({ includeImage: true })` 可**包含章图 dataURL**（数据自包含）
 - 扁平版 `toFlatJSON()`：`stamps[]` 每项内嵌 `user`，需要按签章点遍历时用
 - 单用户查询：`getStampsByUser(userId)`
@@ -566,6 +583,7 @@ pdf-stamp-picker/
 │   ├── react-test.html      # React 18 集成测试页
 │   ├── edge90-sim-test.html # Edge 90 兼容回归测试（?strict=1 验证升级提示）
 │   ├── modal-retest.html   # 弹窗反复打开/取消回归测试（验证 worker blob 复用）
+│   ├── hash-nonsecure-test.html # 哈希回归：安全上下文/内网HTTP纯JS兜底/纯URL补算 4 场景
 │   ├── test.pdf             # 测试 PDF（3 页，含 /Rotate 90）
 │   ├── eight-page.pdf       # 8 页测试 PDF（换文档验证）
 │   ├── chinese-cid.pdf      # 中文 GBK CID 测试 PDF（验证 cMaps）

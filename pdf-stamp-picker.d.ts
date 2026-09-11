@@ -64,6 +64,12 @@ export interface PdfStampPickerOptions {
   cMapUrl?: string;
   /** 旧浏览器兼容策略。默认 false = 自动兼容（自动注入 Array.at/TypedArray.at/structuredClone/replaceAll polyfill 兜底，Edge 90 也能跑）；true = 检测到原生缺失时提示升级并拒绝加载 */
   compatCheck?: boolean;
+  /**
+   * 纯 URL 流式加载时是否额外取一次字节计算 document.hash（默认 false）。
+   * 说明：纯静态地址（load('a.pdf') / load({url:'a.pdf'}) 不带 headers）走 pdf.js 原生流式，库拿不到字节 → 默认哈希为 null；
+   * 置 true 会在 PDF 展示后后台再请求一次该地址用于算 SHA-256，完成后触发 hashready 事件。
+   */
+  hashUrl?: boolean;
   /** 已有 pdfjsLib 实例（可选，避免重复加载） */
   pdfjs?: unknown;
 }
@@ -222,6 +228,14 @@ export default class PdfStampPicker {
   screenToPdf(x: number, y: number): { x: number; y: number };
   pdfToScreen(x: number, y: number): { x: number; y: number };
 
+  /**
+   * 获取当前 PDF 的 SHA-256（小写 hex），不可用时为 null。
+   * 与 toJSON() 的同步读取不同：当以纯 URL + hashUrl:true 加载时哈希是加载后异步补算的，
+   * 用此方法（或监听 hashready 事件）等待就绪；内网 HTTP 等非安全上下文也有值（库内纯 JS 兜底）。
+   */
+  getHash(): Promise<string | null>;
+
+  /** 事件：loadprogress / loaddone / stampadd / stampremove / select / pagechange / zoomchange / hashready … */
   on(type: string, fn: (payload: any) => void): this;
   off(type: string, fn: (payload: any) => void): this;
 

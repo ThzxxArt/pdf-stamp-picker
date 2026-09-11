@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v4.8.26
+ * PdfStampPicker v4.8.27
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.8.26';
+  var VERSION = '4.8.27';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -313,7 +313,8 @@
       maxStampSize: 480,  // 废弃
       pdfjsUrl: null,   // 默认 null：本地探测 vendor/ 优先（内网离线可用），全部失败才 CDN 兜底
       cMapUrl: undefined,  // 中文 PDF 的 CMap 目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
-      compatCheck: false   // 旧浏览器检测：true=检测到原生缺失就提示升级+拒绝加载；默认 false=自动兼容(polyfill 兜底,不提示)
+      compatCheck: false,  // 旧浏览器检测：true=检测到原生缺失就提示升级+拒绝加载；默认 false=自动兼容(polyfill 兜底,不提示)
+      hashUrl: false       // 纯 URL 流式加载时是否额外取一次字节来算 document.hash（默认 false 不额外下载；需要内网 URL 也出哈希时置 true）
     }, options || {});
     if (options && options.pdfjs) this._options.pdfjs = options.pdfjs;
 
@@ -688,12 +689,20 @@
     this._page = null;
     this._pageNumber = 1;
     this._pdfW = 0; this._pdfH = 0;
+    // 换文档 → 旧哈希立即作废（加载失败时不会误报上一篇的哈希）
+    this._pdfHash = null;
+    this._pdfHashPending = null;
 
+    // 记录 URL 来源：纯 URL 流式加载无字节缓存，hashUrl:true 时需后台补算哈希
+    var urlForHash = null, headersForHash = null;
     if (isPdfjsProxy(source)) {
       p = Promise.resolve(source);
     } else if (typeof source === 'string') {
+      urlForHash = source;
       p = this._loadRemote({ url: source, signal: this._abortSignal });
     } else if (source && typeof source === 'object' && typeof source.url === 'string' && !(source instanceof ArrayBuffer)) {
+      urlForHash = source.url;
+      headersForHash = source.headers || null;
       p = this._loadRemote(Object.assign({}, source, { signal: this._abortSignal }));
     } else if (typeof File !== 'undefined' && source instanceof File) {
       this._docName = source.name || '本地文件.pdf';
@@ -738,6 +747,11 @@
         self._pdfHashPromise.then(function (h) { self._pdfHash = h; }).catch(function () { self._pdfHash = null; });
       } else {
         self._pdfHash = null;
+        // 纯 URL 流式加载（pdf.js 原生流式 → 无字节缓存）：hashUrl:true 时后台补算哈希
+        // 补算不阻塞加载；完成后写入 _pdfHash 并触发 hashready 事件
+        if (self._options.hashUrl === true && urlForHash) {
+          self._computeHashFromUrl(urlForHash, headersForHash);
+        }
       }
       self._renderList();
       return self.gotoPage(opts.pageNumber || 1);
@@ -813,6 +827,46 @@
       }
       throw err;
     });
+  };
+
+  /**
+   * 纯 URL 流式加载时的哈希补算（options.hashUrl === true 时启用）
+   * 背景：纯静态地址走 pdf.js 原生流式（Range/大文件友好），库拿不到字节 → 无法算哈希。
+   * 开启后额外请求一次同一地址的字节用于计算 SHA-256，不阻塞 PDF 展示；
+   * 完成后写入 _pdfHash 并触发 hashready 事件（可用 on('hashready', fn) 或 getHash() 等待）。
+   */
+  PdfStampPicker.prototype._computeHashFromUrl = function (url, headers) {
+    var self = this;
+    if (!url || typeof fetch === 'undefined') return;
+    var opts = { credentials: 'same-origin' };
+    if (headers && Object.keys(headers).length) opts.headers = headers;
+    if (this._abortSignal) opts.signal = this._abortSignal;
+    this._pdfHashPending = fetch(url, opts)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.arrayBuffer();
+      })
+      .then(function (buf) { return sha256(buf); })
+      .then(function (h) {
+        if (h) {
+          self._pdfHash = h;
+          self._emit('hashready', { hash: h, hashAlgorithm: 'SHA-256' });
+        }
+        return h;
+      })
+      .catch(function () { return null; });
+  };
+
+  /**
+   * 等待并获取当前 PDF 的 SHA-256 哈希（Promise<string|null>）
+   * 适用：纯 URL + hashUrl:true 时哈希是加载完成后异步补算的，调用方需等待就绪
+   * @returns {Promise<string|null>} 小写 hex；不可用时为 null
+   */
+  PdfStampPicker.prototype.getHash = function () {
+    if (this._pdfHash) return Promise.resolve(this._pdfHash);
+    if (this._pdfHashPromise) return this._pdfHashPromise;
+    if (this._pdfHashPending) return this._pdfHashPending;
+    return Promise.resolve(null);
   };
 
   PdfStampPicker.prototype._getDoc = function (pdfjsCfg) {
@@ -1146,6 +1200,7 @@
     this._pdfBytes = null;
     this._pdfHash = null;
     this._pdfHashPromise = null;
+    this._pdfHashPending = null;
 
     var old = this._canvas;
     var cv = meta.canvas;
@@ -2974,6 +3029,7 @@
     this._pdfBytes = null;
     this._pdfHash = null;
     this._pdfHashPromise = null;
+    this._pdfHashPending = null;
     if (this._root && this._root.parentNode) this._root.parentNode.removeChild(this._root);
     this._listeners = {};
   };
@@ -3139,19 +3195,139 @@
     return src && typeof src.getPage === 'function' && typeof src.numPages === 'number';
   }
 
-  /** 计算 ArrayBuffer 的 SHA-256 哈希（Web Crypto，零依赖；不支持时返回 null） */
-  function sha256(buf) {
-    if (typeof crypto === 'undefined' || !crypto.subtle) {
-      return Promise.resolve(null); // 非安全上下文（http 非 localhost）等场景
-    }
-    return crypto.subtle.digest('SHA-256', buf).then(function (hash) {
-      var bytes = new Uint8Array(hash);
-      var hex = '';
-      for (var i = 0; i < bytes.length; i++) {
-        hex += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+  /* ---------------------------------------------------------------------
+   * 纯 JS SHA-256 兜底（零依赖，库内自带）
+   * 背景：crypto.subtle 只在【安全上下文】（HTTPS / localhost）可用；
+   *       内网 HTTP（http://192.168.x.x）、file:// 等场景下不存在，
+   *       导致 document.hash 恒为 null。此实现保证内网环境同样能出哈希。
+   * 实现：直接处理原始字节（不整体复制，省内存），分块计算并让出主线程，
+   *       超大 PDF 也不会长时间卡住 UI。输出与小写 hex 的 Web Crypto 结果一致。
+   * ------------------------------------------------------------------- */
+  var _SHA256_K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+
+  /**
+   * 纯 JS SHA-256：bytes(Uint8Array) → Promise<hex 小写>
+   * 万一过程中抛错，reject（调用方降级为 null）
+   */
+  function sha256Fallback(bytes) {
+    return new Promise(function (resolve, reject) {
+      try {
+        var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+        var w = new Int32Array(64);
+        var len = bytes.length;
+        var fullBlocksBytes = len - (len % 64);
+
+        // 尾部不足 64 字节的部分：补 0x80 + 零填充 + 64 位大端长度
+        var tailLen = len - fullBlocksBytes;
+        var withPad = tailLen + 9;
+        var tailTotal = withPad + ((64 - (withPad % 64)) % 64);
+        var tail = new Uint8Array(tailTotal);
+        tail.set(bytes.subarray(fullBlocksBytes, len));
+        tail[tailLen] = 0x80;
+        var bitLen = len * 8;
+        var hi = Math.floor(bitLen / 4294967296);
+        var lo = bitLen % 4294967296;
+        tail[tailTotal - 8] = (hi >>> 24) & 255;
+        tail[tailTotal - 7] = (hi >>> 16) & 255;
+        tail[tailTotal - 6] = (hi >>> 8) & 255;
+        tail[tailTotal - 5] = hi & 255;
+        tail[tailTotal - 4] = (lo >>> 24) & 255;
+        tail[tailTotal - 3] = (lo >>> 16) & 255;
+        tail[tailTotal - 2] = (lo >>> 8) & 255;
+        tail[tailTotal - 1] = lo & 255;
+
+        function block(src, o) {
+          var i;
+          for (i = 0; i < 16; i++) {
+            w[i] = (src[o + i * 4] << 24) | (src[o + i * 4 + 1] << 16) |
+                   (src[o + i * 4 + 2] << 8) | src[o + i * 4 + 3];
+          }
+          for (i = 16; i < 64; i++) {
+            var x = w[i - 15], y = w[i - 2];
+            var s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+            var s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+          }
+          var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+          for (i = 0; i < 64; i++) {
+            var S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+            var ch = (e & f) ^ (~e & g);
+            var t1 = (h + S1 + ch + _SHA256_K[i] + w[i]) | 0;
+            var S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+            var maj = (a & b) ^ (a & c) ^ (b & c);
+            var t2 = (S0 + maj) | 0;
+            h = g; g = f; f = e; e = (d + t1) | 0;
+            d = c; c = b; b = a; a = (t1 + t2) | 0;
+          }
+          H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+          H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+        }
+
+        var CHUNK = 512 * 1024; // 每轮最多处理 512KB 后让出主线程（必须是 64 的倍数）
+        function processRange(src, start, end, next) {
+          var o = start;
+          function step() {
+            var stop = Math.min(end, o + CHUNK);
+            while (o < stop) { block(src, o); o += 64; }
+            if (o < end) { setTimeout(step, 0); return; }
+            next();
+          }
+          step();
+        }
+
+        processRange(bytes, 0, fullBlocksBytes, function () {
+          processRange(tail, 0, tailTotal, function () {
+            var hex = '';
+            for (var j = 0; j < 8; j++) {
+              hex += ('00000000' + (H[j] >>> 0).toString(16)).slice(-8);
+            }
+            resolve(hex);
+          });
+        });
+      } catch (err) {
+        reject(err);
       }
-      return hex;
-    }).catch(function () { return null; });
+    });
+  }
+
+  /**
+   * 计算 ArrayBuffer / Uint8Array 的 SHA-256（小写 hex）
+   * 优先 Web Crypto（安全上下文快）；不可用则用库内纯 JS 兜底（内网 HTTP/file:// 也能出哈希）
+   * 两者都失败才返回 null
+   */
+  function sha256(buf) {
+    var bytes;
+    try {
+      bytes = (buf instanceof Uint8Array) ? buf : new Uint8Array(buf);
+    } catch (e) {
+      return Promise.resolve(null);
+    }
+    var subtle = (typeof crypto !== 'undefined' && crypto && crypto.subtle) ? crypto.subtle : null;
+    if (subtle && typeof subtle.digest === 'function') {
+      return subtle.digest('SHA-256', bytes).then(function (hash) {
+        var hb = new Uint8Array(hash);
+        var hex = '';
+        for (var i = 0; i < hb.length; i++) {
+          hex += (hb[i] < 16 ? '0' : '') + hb[i].toString(16);
+        }
+        return hex;
+      }).catch(function () {
+        // Web Crypto 失败（如超大文件内存不足）→ 再用纯 JS 兜底
+        return sha256Fallback(bytes).catch(function () { return null; });
+      });
+    }
+    // ★ 非安全上下文（内网 HTTP 等）：crypto.subtle 不存在 → 纯 JS 兜底
+    return sha256Fallback(bytes).catch(function () { return null; });
   }
 
   /** 兼容旧浏览器：pdf.js 3.11 依赖 Array.prototype.at()，旧内核(Chrome<92/Edge<92/Safari<15.4)不支持 */

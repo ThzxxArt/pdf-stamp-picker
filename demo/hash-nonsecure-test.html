@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>哈希回归测试（内网 HTTP / 纯URL / 安全上下文）</title>
+<style>
+body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
+#log div{padding:2px 0}
+.ok{color:#4ade80}.bad{color:#f87171}.info{color:#93c5fd}
+</style>
+</head>
+<body>
+<h2>PdfStampPicker 哈希回归测试</h2>
+<p class="info" id="env"></p>
+<div id="log"></div>
+<div id="stage" style="position:absolute;left:-9999px;width:400px;height:600px"></div>
+<script src="../pdf-stamp-picker.js?v=4.8.27"></script>
+<script>
+var EXPECT = 'fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac';
+var log = document.getElementById('log');
+function say(msg, cls) {
+  var d = document.createElement('div');
+  d.className = cls || '';
+  d.textContent = msg;
+  log.appendChild(d);
+}
+function stage() {
+  var el = document.createElement('div');
+  el.style.cssText = 'width:400px;height:600px';
+  document.getElementById('stage').appendChild(el);
+  return el;
+}
+function hideSubtle() {
+  try {
+    Object.defineProperty(Crypto.prototype, 'subtle', { get: function () { return undefined; }, configurable: true });
+    return !crypto.subtle;
+  } catch (e) { return false; }
+}
+function mk(opts) { return new PdfStampPicker(stage(), opts || {}); }
+
+var results = [];
+function record(name, pass, detail) {
+  results.push(pass);
+  say((pass ? '✅ ' : '❌ ') + name + ' — ' + detail, pass ? 'ok' : 'bad');
+}
+
+async function t1_secure_with_headers() {
+  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  await p.load({ url: 'test.pdf', headers: { 'X-Test': '1' } });
+  p.on('hashready', function () {});
+  var h = await p.getHash();
+  record('① 安全上下文 + headers', h === EXPECT, 'hash=' + (h ? h.slice(0, 20) + '…' : 'NULL'));
+}
+
+async function t2_nonsecure_with_headers() {
+  var hidden = hideSubtle();
+  say('已隐藏 crypto.subtle（模拟内网 HTTP）→ subtle=' + (crypto.subtle ? '有' : '无'), 'info');
+  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  await p.load({ url: 'test.pdf', headers: { 'X-Test': '1' } });
+  var h = await p.getHash();
+  record('② 内网HTTP + headers（纯JS兜底）', hidden && h === EXPECT, 'hash=' + (h ? h.slice(0, 20) + '…' : 'NULL'));
+}
+
+async function t3_nonsecure_plain_url_hashUrl() {
+  var p = mk({ users: [{ id: 'a', name: '甲方' }], hashUrl: true });
+  var eventHash = null;
+  p.on('hashready', function (e) { eventHash = e.hash; });
+  await p.load('test.pdf');
+  var h = await p.getHash();
+  record('③ 内网HTTP + 纯URL + hashUrl:true', h === EXPECT, 'getHash=' + (h ? h.slice(0, 20) + '…' : 'NULL') + ' / hashready事件=' + (eventHash ? eventHash.slice(0, 12) + '…' : '未触发'));
+}
+
+async function t4_plain_url_default() {
+  var p = mk({ users: [{ id: 'a', name: '甲方' }] });
+  await p.load('test.pdf');
+  var j = p.toJSON();
+  record('④ 纯URL 默认(hashUrl 未开) → 预期无 hash 字段',
+    !j.document.hash && !('hash' in j.document),
+    'document.hash=' + (j.document.hash || '字段不存在') + '（符合设计：不额外下载；需要就开 hashUrl:true）');
+}
+
+(async function () {
+  document.getElementById('env').textContent =
+    '库版本=' + PdfStampPicker.version + ' · isSecureContext=' + window.isSecureContext +
+    ' · 期望哈希=' + EXPECT.slice(0, 20) + '…';
+  try {
+    await t1_secure_with_headers();
+    await t2_nonsecure_with_headers();
+    await t3_nonsecure_plain_url_hashUrl();
+    await t4_plain_url_default();
+  } catch (e) {
+    say('❌ 异常：' + e.message, 'bad');
+    results.push(false);
+  }
+  var pass = results.filter(Boolean).length;
+  say('——— 通过 ' + pass + ' / ' + results.length, pass === results.length ? 'ok' : 'bad');
+  document.title = 'DONE ' + pass + '/' + results.length;
+})();
+</script>
+</body>
+</html>
