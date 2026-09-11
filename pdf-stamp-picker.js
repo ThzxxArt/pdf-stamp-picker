@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v4.9.0
+ * PdfStampPicker v4.9.1
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.9.0';
+  var VERSION = '4.9.1';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -209,6 +209,51 @@
 
   function cloneSel(s) { return s ? { x: s.x, y: s.y, w: s.w, h: s.h } : null; }
 
+  /* ---------------- 坐标换算：纯函数（单一真源） ----------------
+   * 这些函数不依赖实例/DOM，库内部与单元测试共用同一份实现。
+   * 历史教训：换算公式曾在库和 test/coords.test.js 各存一份，库改坏而测试仍绿（测的是副本）。
+   */
+
+  /** 由 PDF 尺寸 + 旋转 + 显示尺寸推导换算几何。返回 { width,height,rotation,sx,sy,offsetX,offsetY } */
+  function makeGeom(pdfW, pdfH, rotation, displayW, displayH, offsetX, offsetY) {
+    var r = rotation || 0;
+    var spanW = (r === 90 || r === 270) ? pdfH : pdfW;
+    var spanH = (r === 90 || r === 270) ? pdfW : pdfH;
+    return {
+      width: pdfW, height: pdfH, rotation: r,
+      sx: spanW ? displayW / spanW : 1,
+      sy: spanH ? displayH / spanH : 1,
+      offsetX: offsetX || 0, offsetY: offsetY || 0
+    };
+  }
+
+  /** 屏幕(容器)坐标 → PDF 坐标 */
+  function pdfCoordFromScreen(cx, cy, g) {
+    var sx = g.sx, sy = g.sy, W = g.width, H = g.height, r = g.rotation;
+    var x, y;
+    switch (r) {
+      case 90:  x = cy / sy;     y = cx / sx;     break;
+      case 180: x = W - cx / sx; y = cy / sy;     break;   // 注意：y 不镜像（与 pdf.js viewport 对齐）
+      case 270: x = W - cy / sy; y = H - cx / sx; break;
+      default:  x = cx / sx;     y = H - cy / sy; break;
+    }
+    return { x: x + g.offsetX, y: y + g.offsetY };
+  }
+
+  /** PDF 坐标 → 屏幕(容器)坐标 */
+  function screenCoordFromPdf(px, py, g) {
+    var sx = g.sx, sy = g.sy, W = g.width, H = g.height, r = g.rotation;
+    var x = px - g.offsetX, y = py - g.offsetY;
+    var cx, cy;
+    switch (r) {
+      case 90:  cx = y * sy;       cy = x * sx;       break;
+      case 180: cx = (W - x) * sx; cy = y * sy;       break;   // 与 pdfCoordFromScreen 严格互逆
+      case 270: cx = (H - y) * sy; cy = (W - x) * sx; break;
+      default:  cx = x * sx;       cy = (H - y) * sy; break;
+    }
+    return { x: cx, y: cy };
+  }
+
   function handleCursor(h) {
     var map = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize',
                 n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
@@ -306,6 +351,7 @@
       users: null,
       currentUser: null,
       allowMulti: true,
+      keepSelectionOnPageChange: false, // 翻页时是否保留当前选区/选中态（默认 false = 清空，保持历史行为）
       stampImage: null,
       stampSize: 120,
       stampMargin: 12,   // 签章距页面边界的最小间距(px)，0=紧贴边界不可超出
@@ -1938,31 +1984,18 @@
     return this._spanH() ? this._displayH / this._spanH() : 1;
   };
 
+  /** 当前换算几何（内部使用；纯计算，见 makeGeom） */
+  PdfStampPicker.prototype._geom = function () {
+    return makeGeom(this._pdfW, this._pdfH, this._rotation,
+                    this._displayW, this._displayH, this._offsetX, this._offsetY);
+  };
+
   PdfStampPicker.prototype.screenToPdf = function (cx, cy) {
-    var sx = this._sx(), sy = this._sy();
-    var W = this._pdfW, H = this._pdfH, r = this._rotation;
-    var x, y;
-    switch (r) {
-      case 90:  x = cy / sy;       y = cx / sx;       break;
-      case 180: x = W - cx / sx;   y = H - cy / sy;   break;
-      case 270: x = W - cy / sy;   y = H - cx / sx;   break;
-      default:  x = cx / sx;       y = H - cy / sy;   break;
-    }
-    return { x: x + this._offsetX, y: y + this._offsetY };
+    return pdfCoordFromScreen(cx, cy, this._geom());
   };
 
   PdfStampPicker.prototype.pdfToScreen = function (px, py) {
-    var sx = this._sx(), sy = this._sy();
-    var W = this._pdfW, H = this._pdfH, r = this._rotation;
-    var x = px - this._offsetX, y = py - this._offsetY;
-    var cx, cy;
-    switch (r) {
-      case 90:  cx = y * sy;       cy = x * sx;       break;
-      case 180: cx = (W - x) * sx; cy = (H - y) * sy; break;
-      case 270: cx = (H - y) * sy; cy = (W - x) * sx; break;
-      default:  cx = x * sx;       cy = (H - y) * sy; break;
-    }
-    return { x: cx, y: cy };
+    return screenCoordFromPdf(px, py, this._geom());
   };
 
   PdfStampPicker.prototype._units = function (ptObj) {
@@ -4025,7 +4058,9 @@
     return { stamps: stamps, users: users };
   }
 
-  PdfStampPicker._internals = { buildJSON: buildJSON, buildFlatJSON: buildFlatJSON, parseImportJSON: parseImportJSON, genId: genId, normalizeRotation: normalizeRotation };
+  PdfStampPicker._internals = { buildJSON: buildJSON, buildFlatJSON: buildFlatJSON, parseImportJSON: parseImportJSON, genId: genId, normalizeRotation: normalizeRotation,
+    // 坐标换算纯函数（单一真源）：库内部与单元测试共用同一份实现
+    makeGeom: makeGeom, pdfCoordFromScreen: pdfCoordFromScreen, screenCoordFromPdf: screenCoordFromPdf };
   PdfStampPicker._localCandidates = PdfStampPicker._localCandidates || null; // 由下方赋值（保持单测可访问）
 
   return PdfStampPicker;

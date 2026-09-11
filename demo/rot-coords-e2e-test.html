@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>旋转页坐标端到端（真实 load 路径 vs pdf.js）</title>
+<style>
+  body { font: 13px/1.7 ui-monospace, Menlo, Consolas, monospace; background: #14161a; color: #d7dae0; margin: 0; padding: 16px; }
+  #log div { padding: 2px 6px; border-radius: 4px; }
+  .ok { color: #7ee787; } .bad { color: #ff7b72; background: #3d1418; } .info { color: #79c0ff; }
+  .sum { margin-top: 10px; font-weight: 700; }
+  #stage { position: fixed; left: -4000px; top: 0; width: 420px; height: 560px; }
+</style>
+</head>
+<body>
+<h3>旋转页坐标端到端：真实 <code>load()</code> 路径 vs pdf.js 权威实现</h3>
+<div id="ver" class="info"></div>
+<div id="log"></div>
+<div id="stage"></div>
+<script src="../pdf-stamp-picker.js?v=4.9.1"></script>
+<script src="test-harness.js?v=4.9.1"></script>
+<script>
+function say(t, cls) { var d = document.createElement('div'); if (cls) d.className = cls; d.textContent = t; document.getElementById('log').appendChild(d); }
+function record(name, pass, detail) { __TEST.record(name, pass, detail); say((pass ? '✅ ' : '❌ ') + name + ' — ' + detail, pass ? 'ok' : 'bad'); }
+var NEAR = 0.01;
+function near(a, b, eps) { return Math.abs(a - b) <= (eps == null ? NEAR : eps); }
+
+var CASES = [
+  { file: 'test.pdf',  expect: 0,   label: '无旋转' },
+  { file: 'rot90.pdf', expect: 90,  label: '/Rotate 90' },
+  { file: 'rot180.pdf', expect: 180, label: '/Rotate 180' },
+  { file: 'rot270.pdf', expect: 270, label: '/Rotate 270' },
+  // 非零原点 CropBox（page.view=[10,20,600,860] → offset (10,20)）：验证 offset 平移项与旋转分支叠加
+  { file: 'crop-rot0.pdf',   expect: 0,   label: '裁剪原点 + /Rotate 0',   off: [10, 20] },
+  { file: 'crop-rot90.pdf',  expect: 90,  label: '裁剪原点 + /Rotate 90',  off: [10, 20] },
+  { file: 'crop-rot180.pdf', expect: 180, label: '裁剪原点 + /Rotate 180', off: [10, 20] },
+  { file: 'crop-rot270.pdf', expect: 270, label: '裁剪原点 + /Rotate 270', off: [10, 20] }
+];
+
+(async function run() {
+  __TEST.start('旋转页坐标端到端（真实 load 路径 vs pdf.js）');
+  __TEST.expect(CASES.length * 8);   // 每个用例 8 条断言（6 条换算 + 2 条真实点击链路）
+  document.getElementById('ver').textContent = '库版本 ' + PdfStampPicker.version;
+  try { await PdfStampPicker.loadPdfJsAuto(); }
+  catch (e) { record('pdf.js 加载', false, e.message); __TEST.finish(); return; }
+
+  for (var i = 0; i < CASES.length; i++) {
+    var c = CASES[i];
+    var host = document.createElement('div');
+    host.style.cssText = 'width:420px;height:560px';
+    document.getElementById('stage').appendChild(host);
+    var p = new PdfStampPicker(host, { zoom: 'fit-width' });
+    try {
+      await p.load(c.file);
+    } catch (e) {
+      record(c.label + ' · 能加载', false, e.message);
+      continue;
+    }
+    // 库内部的页面/旋转/几何
+    var page = await p._pdf.getPage(p._pageNumber);
+    var v = page.view, W = v[2] - v[0], H = v[3] - v[1];
+    record(c.label + ' · 旋转识别正确', p._rotation === c.expect,
+      '库 _rotation=' + p._rotation + ' 期望=' + c.expect);
+
+    // 权威参照：pdf.js 与库同缩放、同旋转（getViewport 默认取 page.rotate）
+    var vp = page.getViewport({ scale: p._cssScale });
+
+    // ① 容器中心 → PDF 页中心（与旋转无关的真不变量；含裁剪原点偏移）
+    var ctr = p.screenToPdf(p._displayW / 2, p._displayH / 2);
+    var expCtrX = p._offsetX + W / 2, expCtrY = p._offsetY + H / 2;
+    var offOk = !c.off || (near(p._offsetX, c.off[0], 0.001) && near(p._offsetY, c.off[1], 0.001));
+    record(c.label + ' · 容器中心映射到页中心（含裁剪原点）',
+      offOk && near(ctr.x, expCtrX) && near(ctr.y, expCtrY),
+      'offset=(' + p._offsetX + ',' + p._offsetY + ')' + (c.off ? ' 期望=(' + c.off.join(',') + ')' : '') +
+      ' lib=(' + ctr.x.toFixed(2) + ',' + ctr.y.toFixed(2) + ') 期望=(' + expCtrX.toFixed(2) + ',' + expCtrY.toFixed(2) + ')');
+
+    // ② 逐点与 pdf.js 对比（正向 屏幕→PDF）
+    var worst = 0, worstInfo = '';
+    [[0, 0], [vp.width, 0], [0, vp.height], [vp.width, vp.height],
+     [vp.width * 0.37, vp.height * 0.62]].forEach(function (pt) {
+      var lib = p.screenToPdf(pt[0], pt[1]);
+      var ref = vp.convertToPdfPoint(pt[0], pt[1]);
+      var d = Math.max(Math.abs(lib.x - ref[0]), Math.abs(lib.y - ref[1]));
+      if (d > worst) { worst = d; worstInfo = '(' + pt[0].toFixed(0) + ',' + pt[1].toFixed(0) + ') lib=(' + lib.x.toFixed(2) + ',' + lib.y.toFixed(2) + ') pdfjs=(' + ref[0].toFixed(2) + ',' + ref[1].toFixed(2) + ')'; }
+    });
+    record(c.label + ' · 正向换算与 pdf.js 一致', worst < NEAR, '最大偏差=' + worst.toFixed(4) + ' ' + worstInfo);
+
+    // ③ 逆向换算与 pdf.js 一致（PDF→屏幕）
+    var worst2 = 0, info2 = '';
+    [[W * 0.2, H * 0.3], [W, H], [0, 0], [W * 0.85, H * 0.9]].forEach(function (pt) {
+      var lib = p.pdfToScreen(pt[0], pt[1]);
+      var ref = vp.convertToViewportPoint(pt[0], pt[1]);
+      var d = Math.max(Math.abs(lib.x - ref[0]), Math.abs(lib.y - ref[1]));
+      if (d > worst2) { worst2 = d; info2 = 'pdf=(' + pt[0].toFixed(1) + ',' + pt[1].toFixed(1) + ') lib=(' + lib.x.toFixed(2) + ',' + lib.y.toFixed(2) + ') pdfjs=(' + ref[0].toFixed(2) + ',' + ref[1].toFixed(2) + ')'; }
+    });
+    record(c.label + ' · 逆向换算与 pdf.js 一致', worst2 < NEAR, '最大偏差=' + worst2.toFixed(4) + ' ' + info2);
+
+    // ④ 往返自洽
+    var rt = p.screenToPdf(p.pdfToScreen(101.5, 202.5).x, p.pdfToScreen(101.5, 202.5).y);
+    record(c.label + ' · 往返自洽', near(rt.x, 101.5) && near(rt.y, 202.5),
+      '往返=(' + rt.x.toFixed(3) + ',' + rt.y.toFixed(3) + ')');
+
+    // ⑤ 旋转后显示宽高应互换
+    var hasSwap = (c.expect === 90 || c.expect === 270);
+    var expectDispW = (hasSwap ? H : W) * p._cssScale;
+    record(c.label + ' · 显示尺寸与旋转一致', near(p._displayW, expectDispW, 0.5),
+      '_displayW=' + p._displayW.toFixed(1) + ' 期望=' + expectDispW.toFixed(1));
+
+    // ⑥ 真实指针交互端到端：在旋转页上"点一下"，落点 PDF 坐标须等于 pdf.js 权威值
+    //    这一步才真正串起 事件坐标 → clamp → getSelection → screenToPdf 的完整链路，
+    //    前面的直调 screenToPdf 无法覆盖 getBoundingClientRect 偏移/clamp/取整等环节。
+    p.setMode('point');
+    var ore = p._overlay.getBoundingClientRect();
+    var hitX = vp.width * 0.31, hitY = vp.height * 0.44;
+    var sel = null, evErr = '';
+    try {
+      p._overlay.dispatchEvent(new PointerEvent('pointerdown', {
+        clientX: ore.left + hitX, clientY: ore.top + hitY,
+        pointerId: 1, bubbles: true, cancelable: true, isPrimary: true
+      }));
+      sel = p.getSelection();
+    } catch (e) { evErr = e.message; }
+    var refHit = vp.convertToPdfPoint(hitX, hitY);
+    record(c.label + ' · 真实点击落点与 pdf.js 一致',
+      !!sel && near(sel.x, refHit[0]) && near(sel.y, refHit[1]),
+      sel ? ('点击(' + hitX.toFixed(1) + ',' + hitY.toFixed(1) + ') lib=(' + sel.x + ',' + sel.y + ') pdfjs=(' +
+             refHit[0].toFixed(2) + ',' + refHit[1].toFixed(2) + ')') : ('选区为空 ' + evErr));
+
+    // ⑦ 落点回画：把落点按库的绘制路径折回屏幕，必须回到点击的那一点（章才画在手指下）
+    var back = sel ? p.pdfToScreen(sel.x, sel.y) : null;
+    record(c.label + ' · 落点回画位置正确',
+      !!back && near(back.x, hitX, 0.05) && near(back.y, hitY, 0.05),
+      back ? ('回画=(' + back.x.toFixed(3) + ',' + back.y.toFixed(3) + ') 点击点=(' + hitX.toFixed(3) + ',' + hitY.toFixed(3) + ')')
+           : '无选区，无法回画');
+
+    p.destroy();
+    host.remove();
+  }
+  var sum = __TEST.summary();
+  say('——— 通过 ' + sum.passed + ' / ' + sum.total, sum.failed === 0 ? 'ok' : 'bad');
+  __TEST.finish();
+})();
+</script>
+</body>
+</html>

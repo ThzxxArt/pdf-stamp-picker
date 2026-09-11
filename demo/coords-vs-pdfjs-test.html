@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>坐标换算 vs pdf.js 权威实现（交叉验证）</title>
+<style>
+  body{font:13px/1.7 -apple-system,system-ui,"PingFang SC",monospace;padding:14px;background:#111;color:#ddd}
+  .ok{color:#5ddb7a}.bad{color:#ff6b6b}.info{color:#7ab8ff}.sum{font-weight:700;margin-top:10px;font-size:15px}
+  #log div{white-space:pre-wrap}
+</style>
+</head>
+<body>
+<h3>坐标换算 vs pdf.js 权威实现</h3>
+<p class="info">用 pdf.js 自己的 <code>viewport.convertToPdfPoint()</code> 作为参照，逐点比对库的 <code>screenToPdf()</code>。<br>
+这条用例的意义：库的换算公式不再是「自己说自己对」，而是与 pdf.js 官方实现对账。</p>
+<div id="log"></div>
+<script src="../pdf-stamp-picker.js?v=4.9.1"></script>
+<script src="test-harness.js?v=4.9.1"></script>
+<script>
+var log = document.getElementById('log');
+function say(t, cls) { var d = document.createElement('div'); d.className = cls || ''; d.textContent = t; log.appendChild(d); }
+
+__TEST.start('坐标换算 vs pdf.js 权威实现');
+__TEST.expect(8);   // 4 个旋转 × (正向 1 条聚合 + 反向 1 条聚合)
+                    // 曾经写 34（每点一条的设想），但代码实际只记录聚合条数 → 条数不符被判失败。
+                    // 教训：expect 必须与 record 的真实条数一致，否则 harness 会把"漏跑/多报"标红。
+
+/* 用原型方法 + 手工 this 构造"假实例"：不需要 DOM，测的就是库里真正跑的那套逻辑 */
+function fakeInstance(pdfW, pdfH, rotation, dispW, dispH, offX, offY) {
+  return {
+    _pdfW: pdfW, _pdfH: pdfH, _rotation: rotation,
+    _displayW: dispW, _displayH: dispH, _offsetX: offX || 0, _offsetY: offY || 0,
+    _geom: PdfStampPicker.prototype._geom,
+    screenToPdf: PdfStampPicker.prototype.screenToPdf,
+    pdfToScreen: PdfStampPicker.prototype.pdfToScreen
+  };
+}
+
+(async function () {
+  var pdfjs, doc, page;
+  try {
+    pdfjs = await PdfStampPicker.loadPdfJsAuto();
+    doc = await pdfjs.getDocument('test.pdf').promise;
+    page = await doc.getPage(1);
+  } catch (e) {
+    say('❌ pdf.js 或 test.pdf 加载失败：' + e.message, 'bad');
+    __TEST.record('加载 pdf.js / test.pdf', false, e.message);
+    __TEST.finish(); return;
+  }
+
+  var view = page.view;                    // CropBox: [x0,y0,x1,y1]
+  var pdfW = view[2] - view[0];
+  var pdfH = view[3] - view[1];
+  say('page.view = [' + view.join(', ') + ']  → PDF 尺寸 ' + pdfW.toFixed(2) + ' × ' + pdfH.toFixed(2), 'info');
+
+  var rotations = [0, 90, 180, 270];
+  var scale = 1.5;
+  var maxDiff = 0;
+
+  for (var i = 0; i < rotations.length; i++) {
+    var rot = rotations[i];
+    var vp = page.getViewport({ scale: scale, rotation: rot });
+    // 库的实例：显示区域 = viewport 的像素尺寸
+    var inst = fakeInstance(pdfW, pdfH, rot, vp.width, vp.height, view[0], view[1]);
+
+    // 在 viewport 内取 4 个点（含中心），逐点与 pdf.js 对账
+    var pts = [
+      [0, 0],
+      [vp.width / 2, vp.height / 2],
+      [vp.width, 0],
+      [vp.width / 3, vp.height * 0.7]
+    ];
+    var worst = 0, worstAt = '';
+    for (var j = 0; j < pts.length; j++) {
+      var cx = pts[j][0], cy = pts[j][1];
+      var mine = inst.screenToPdf(cx, cy);
+      var ref = vp.convertToPdfPoint(cx, cy);
+      var dx = Math.abs(mine.x - ref[0]);
+      var dy = Math.abs(mine.y - ref[1]);
+      var d = Math.max(dx, dy);
+      if (d > worst) { worst = d; worstAt = ' @(' + cx.toFixed(1) + ',' + cy.toFixed(1) + ') lib=(' + mine.x.toFixed(2) + ',' + mine.y.toFixed(2) + ') pdfjs=(' + ref[0].toFixed(2) + ',' + ref[1].toFixed(2) + ')'; }
+    }
+    if (worst > maxDiff) maxDiff = worst;
+
+    var pass = worst < 0.02;
+    say((pass ? '✅ ' : '❌ ') + 'rotation=' + rot + '：与 pdf.js 最大偏差 ' + worst.toFixed(6) + ' PDF 单位' +
+        '（viewport ' + vp.width.toFixed(1) + '×' + vp.height.toFixed(1) + '）' + worstAt, pass ? 'ok' : 'bad');
+    __TEST.record('rotation=' + rot + ' 换算与 pdf.js 一致', pass, '最大偏差=' + worst.toFixed(6) + worstAt);
+  }
+
+  // 反向：pdf.js 的 convertToViewportPoint 对账 pdfToScreen
+  for (var k = 0; k < rotations.length; k++) {
+    var rot2 = rotations[k];
+    var vp2 = page.getViewport({ scale: scale, rotation: rot2 });
+    var inst2 = fakeInstance(pdfW, pdfH, rot2, vp2.width, vp2.height, view[0], view[1]);
+    var pdfPt = [pdfW / 2, pdfH / 3];
+    var mine2 = inst2.pdfToScreen(pdfPt[0], pdfPt[1]);
+    var ref2 = vp2.convertToViewportPoint(pdfPt[0], pdfPt[1]);
+    var d2 = Math.max(Math.abs(mine2.x - ref2[0]), Math.abs(mine2.y - ref2[1]));
+    if (d2 > maxDiff) maxDiff = d2;
+    var pass2 = d2 < 0.02;
+    say((pass2 ? '✅ ' : '❌ ') + '反向 rotation=' + rot2 + '：与 pdf.js 最大偏差 ' + d2.toFixed(6), pass2 ? 'ok' : 'bad');
+    __TEST.record('rotation=' + rot2 + ' 反向换算与 pdf.js 一致', pass2, '偏差=' + d2.toFixed(6));
+  }
+
+  var d = document.createElement('div');
+  d.className = 'sum ' + (maxDiff < 0.02 ? 'ok' : 'bad');
+  d.textContent = '=== 全部偏差上界：' + maxDiff.toFixed(6) + ' PDF 单位 ' + (maxDiff < 0.02 ? '→ 与 pdf.js 完全吻合 ✅' : '→ 存在不一致 ❌') + ' ===';
+  log.appendChild(d);
+  __TEST.finish();
+})();
+</script>
+</body>
+</html>

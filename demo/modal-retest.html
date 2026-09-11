@@ -93,9 +93,17 @@ function openModalOnce(label) {
 }
 </script>
 
-<script src="../pdf-stamp-picker.js?v=4.9.0"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.1"></script>
+<script src="test-harness.js?v=4.9.1"></script>
 <script>
 window.__log('库已加载，version = ' + (PdfStampPicker && PdfStampPicker.version));
+__TEST.start('弹框重复打开回归测试');
+__TEST.expect(4);
+
+function assert(name, pass, detail) {
+  __TEST.record(name, pass, detail);
+  window.__log((pass ? '✅ ' : '❌ ') + name + ' — ' + detail);
+}
 
 document.getElementById('btn-open').addEventListener('click', function () {
   openModalOnce('第 1 次打开');
@@ -116,12 +124,18 @@ setTimeout(function () { openModalOnce('第 3 次打开'); }, 10500);
 setTimeout(function () {
   window.__log('\n===== 结果汇总 =====');
   window.__log('worker fetch 总次数 = ' + window.__workerFetchCount + '（理想值：1，复用缓存则始终为 1）');
-  window.__log('弹框 DOM 残留 = ' + (document.querySelector('.psp-modal-mask') ? '有 ❌' : '无 ✅'));
+  var residue = !!document.querySelector('.psp-modal-mask');
+  window.__log('弹框 DOM 残留 = ' + (residue ? '有' : '无'));
   var probes = Object.keys(window.__renderProbe).map(function (k) { return k + ': ' + window.__renderProbe[k]; });
   window.__log('渲染探针：\n  ' + probes.join('\n  '));
   var allRendered = probes.length === 3 && probes.every(function (s) { return s.indexOf('已渲染') >= 0; });
-  window.__log('三次打开均渲染出 PDF = ' + (allRendered ? '是 ✅' : '否 ❌'));
-  document.title = (window.__workerFetchCount <= 1 && allRendered) ? 'PASS' : 'FAIL';
+  window.__log('三次打开均渲染出 PDF = ' + (allRendered ? '是' : '否'));
+
+  assert('① worker 源码只 fetch 一次（跨实例复用缓存）', window.__workerFetchCount <= 1, 'fetch 次数=' + window.__workerFetchCount);
+  assert('② 三次打开都真实渲染出 PDF（非空白）', allRendered, probes.join(' | '));
+  assert('③ 关闭后无弹框 DOM 残留', !residue, residue ? '有残留' : '无残留');
+  assert('④ 每次打开都产生了渲染探针（无静默跳过）', probes.length === 3, '探针数=' + probes.length);
+  __TEST.finish();
 }, 15000);
 </script>
 </body>

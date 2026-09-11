@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PdfStampPicker 全量浏览器回归（聚合器）</title>
+<style>
+body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
+h2{margin:0 0 6px}
+#sum{font-size:16px;font-weight:bold;margin:10px 0;padding:8px 10px;border-radius:6px}
+.pass{background:#14351f;color:#4ade80}
+.fail{background:#3a1518;color:#f87171}
+.info{color:#93c5fd}
+.case{padding-left:16px}
+.ok{color:#4ade80}.bad{color:#f87171}.skip{color:#fbbf24}
+iframe{position:absolute;left:-9999px;top:0;width:1000px;height:900px;border:0}
+#detail div{padding:1px 0}
+</style>
+</head>
+<body>
+<h2>PdfStampPicker 全量浏览器回归</h2>
+<p class="info" id="ver">准备中…</p>
+<div id="sum">运行中…</div>
+<div id="detail"></div>
+<div id="frames"></div>
+
+<script>
+/* ============================================================================
+ * 聚合器：把散落的测试页收口成"一次运行、一个结论"。
+ *
+ * 为什么不是脚本/CI 驱动：本项目的回归必须跑真实 pdf.js + 真实 Worker + canvas，
+ * 只能在实际浏览器里执行；而"手工逐个打开页面看日志"正是历史上假通过的根源
+ * （断言写错/用例挂起都看不出来）。因此这里用同源 iframe 串行驱动，
+ * 每个页面的结果由 test-harness.js 暴露为 window.__RESULT__，聚合器负责：
+ *   - 超时判定（挂起 = 失败，而不是"还没跑完"）
+ *   - 断言条数核对（漏跑 = 失败）
+ *   - 未捕获异常/未处理拒绝（= 失败）
+ * ========================================================================== */
+
+// 每个条目：[页面, 显示名, query, 超时ms]
+var SUITE = [
+  ['h1-lifecycle-test.html',     '① 加载生命周期（并发/串档/中止/失败上报）', '',               60000],
+  ['hash-nonsecure-test.html',   '② 哈希（安全上下文 / 内网HTTP / 纯URL / 20MB 竞态）', '',      90000],
+  ['edge90-sim-test.html',       '③ Edge90 兼容（默认自动兼容）',                '',               40000],
+  ['edge90-sim-test.html',       '④ Edge90 兼容（compatCheck:true 严格）',       '?strict=1',      40000],
+  ['modal-retest.html',          '⑤ 弹框反复开关（worker 复用 + 真实渲染）',      '',               45000],
+  ['coords-vs-pdfjs-test.html',  '⑥ 坐标换算 vs pdf.js 权威实现（无 DOM 纯换算）', '',               30000],
+  ['rot-coords-e2e-test.html',   '⑦ 旋转页坐标端到端（真实 load + 真实点击）',     '',               45000]
+];
+
+var frames = document.getElementById('frames');
+var detail = document.getElementById('detail');
+var sumEl = document.getElementById('sum');
+
+function line(msg, cls) {
+  var d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = msg;
+  detail.appendChild(d);
+}
+
+function runOne(entry) {
+  var page = entry[0], label = entry[1], query = entry[2], timeout = entry[3];
+  return new Promise(function (resolve) {
+    line('▶ ' + label + ' …', 'info');
+    var ifr = document.createElement('iframe');
+    var done = false;
+    var t0 = Date.now();
+
+    function settle(res) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { ifr.remove(); } catch (e) {}
+      resolve(res);
+    }
+
+    var timer = setTimeout(function () {
+      var r = null;
+      try { r = ifr.contentWindow && ifr.contentWindow.__RESULT__; } catch (e) {}
+      settle({
+        label: label, page: page, timedOut: true,
+        passed: r ? r.passed : 0, total: r ? r.total : 0,
+        cases: r && r.cases ? r.cases : [],
+        error: '超时 ' + timeout + 'ms 未结束（用例挂起？）'
+      });
+    }, timeout);
+
+    ifr.src = page + (query ? query + '&' : '?') + '_t=' + Date.now();
+    ifr.onload = function () {
+      // 轮询 window.__RESULT__（跨 iframe 无法直接 await）
+      var poll = setInterval(function () {
+        var r = null;
+        try { r = ifr.contentWindow && ifr.contentWindow.__RESULT__; } catch (e) {}
+        if (r && r.done) {
+          clearInterval(poll);
+          settle({
+            label: label, page: page, timedOut: false,
+            passed: r.passed, total: r.total, expected: r.expected,
+            cases: r.cases, error: r.error,
+            status: r.status, durationMs: Date.now() - t0
+          });
+        }
+      }, 250);
+    };
+    frames.appendChild(ifr);
+  });
+}
+
+(async function () {
+  var t0 = Date.now();
+  if (window.PdfStampPicker) document.getElementById('ver').textContent = '库版本 ' + PdfStampPicker.version;
+  else document.getElementById('ver').textContent = '库版本未知（未在父页引入库，仅驱动 iframe）';
+
+  var all = [];
+  for (var i = 0; i < SUITE.length; i++) {
+    var res = await runOne(SUITE[i]);
+    all.push(res);
+
+    var hasCaseFail = res.cases.some(function (c) { return !c.pass; });
+    var countMismatch = (res.expected != null) && (res.total !== res.expected);
+    var ok = !res.timedOut && !res.error && !hasCaseFail && !countMismatch;
+
+    line((ok ? '✅ ' : '❌ ') + res.label + ' — ' + res.passed + '/' + res.total +
+      (res.expected != null ? ' (expect ' + res.expected + ')' : '') +
+      ' · ' + (res.durationMs || 0) + 'ms' + (res.timedOut ? ' · 超时' : '') + (res.error ? ' · ' + res.error : ''),
+      ok ? 'ok' : 'bad');
+    res.cases.forEach(function (c) {
+      if (!c.pass) line('      ✗ ' + c.name + ' — ' + c.detail, 'bad');
+    });
+    if (countMismatch) line('      ✗ 断言条数不符：实际 ' + res.total + '，期望 ' + res.expected + '（有用例漏跑）', 'bad');
+  }
+
+  var failedSuites = all.filter(function (r) {
+    return r.timedOut || r.error || r.cases.some(function (c) { return !c.pass; }) ||
+      ((r.expected != null) && (r.total !== r.expected));
+  });
+  var totalCases = all.reduce(function (a, r) { return a + r.total; }, 0);
+  var passCases = all.reduce(function (a, r) { return a + r.passed; }, 0);
+  var okAll = failedSuites.length === 0;
+
+  sumEl.className = okAll ? 'pass' : 'fail';
+  sumEl.textContent = (okAll ? '✅ 全量回归通过：' : '❌ 全量回归失败：') +
+    all.length + ' 个套件 · ' + passCases + '/' + totalCases + ' 条断言 · ' +
+    ((Date.now() - t0) / 1000).toFixed(1) + 's' +
+    (okAll ? '' : ' · 失败套件 ' + failedSuites.length + ' 个');
+
+  window.__RESULT__ = {
+    status: okAll ? 'done' : 'error',
+    done: true,
+    suites: all.map(function (r) {
+      return { label: r.label, page: r.page, passed: r.passed, total: r.total,
+               expected: r.expected, timedOut: !!r.timedOut, error: r.error || null,
+               durationMs: r.durationMs || 0,
+               // 保留全部断言明细（含通过项）——回归 review 需要证据，不能只有绿勾
+               cases: (r.cases || []).map(function (c) { return { name: c.name, pass: c.pass, detail: c.detail }; }),
+               failedCases: r.cases.filter(function (c) { return !c.pass; }).map(function (c) { return c.name; }) };
+    }),
+    totalSuites: all.length,
+    failedSuites: failedSuites.length,
+    totalCases: totalCases,
+    passedCases: passCases,
+    durationMs: Date.now() - t0
+  };
+  document.title = (okAll ? 'ALL PASS ' : 'ALL FAIL ') + passCases + '/' + totalCases;
+})();
+</script>
+</body>
+</html>

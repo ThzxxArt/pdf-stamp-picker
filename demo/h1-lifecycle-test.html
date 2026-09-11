@@ -15,7 +15,8 @@ body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
 <p class="info" id="ver"></p>
 <div id="log"></div>
 <div id="stage"></div>
-<script src="../pdf-stamp-picker.js?v=4.9.0"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.1"></script>
+<script src="test-harness.js?v=4.9.1"></script>
 <script>
 var log = document.getElementById('log');
 function say(msg, cls) {
@@ -36,6 +37,7 @@ function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 var results = [];
 function record(name, pass, detail) {
   results.push({ name: name, pass: pass });
+  __TEST.record(name, pass, detail);
   say((pass ? '✅ ' : '❌ ') + name + ' — ' + detail, pass ? 'ok' : 'bad');
 }
 function isAbort(e) { return !!(e && (e.name === 'AbortError' || e.superseded)); }
@@ -277,12 +279,17 @@ async function t11_no_half_loaded_residue() {
 
 (async function run() {
   document.getElementById('ver').textContent = '库版本 ' + PdfStampPicker.version;
+  __TEST.start('H1 加载生命周期回归测试');
+  __TEST.expect(16);   // 断言条数写死：漏跑即失败（防止"少测了"被当全绿）
   try {
     await PdfStampPicker.loadPdfJsAuto();
     installDelayMock();
     say('pdf.js 已就绪，延迟注入器已安装', 'info');
   } catch (e) {
     say('pdf.js 加载失败：' + e.message, 'bad');
+    record('pdf.js 加载', false, e.message);
+    __TEST.finish();
+    return;
   }
   var cases = [t1_concurrent, t2_hash_carryover, t3_hash_cleared, t4_stale_hashurl,
                t5_error_event, t6_abort, t7_destroy_inflight, t8_rapid_page,
@@ -295,7 +302,7 @@ async function t11_no_half_loaded_residue() {
   d.className = 'sum ' + (pass === results.length ? 'ok' : 'bad');
   d.textContent = '=== H1 回归：' + pass + '/' + results.length + ' 通过 ===';
   log.appendChild(d);
-  document.title = 'H1 ' + pass + '/' + results.length;
+  __TEST.finish();
 })();
 </script>
 </body>

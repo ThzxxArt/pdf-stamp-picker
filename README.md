@@ -430,7 +430,7 @@ const signFlow = {
 
 ## 配置
 
-### 构造选项（全部 30 项）
+### 构造选项（全部 31 项）
 
 | option | 默认 | 说明 |
 |---|---|---|
@@ -464,7 +464,6 @@ const signFlow = {
 | `credentials` | `'same-origin'` | `fetch` 凭据模式：`'omit'` / `'same-origin'` / `'include'`（跨域带 Cookie 的文件流接口需 `'include'`） |
 | `cache` | — | `fetch` cache 模式透传（内网可用 `'no-store'` 避免缓存旧 PDF） |
 | `referrerPolicy` | — | `fetch` referrerPolicy 透传 |
-| `keepSelectionOnPageChange` | `false` | 翻页时是否保留当前选区/选中态 |
 
 ### 工具栏配置（弹窗/容器通用）
 
@@ -572,6 +571,8 @@ new PdfStampPicker('#stage', { toolbar: false });
 - **屏幕坐标**：CSS px，原点页面左上角，Y 向下
 - **PDF 坐标（输出）**：pt（1/72 inch），原点页面左下角（含 CropBox 偏移），Y 向上
 - 自动补偿页面旋转（0/90/180/270），`rotation` 字段保留原始旋转值
+- **与 pdf.js 视口约定逐点对账（v4.9.1 起）**：旋转页的换算结果与 `pdf.js` 的 `viewport.convertToPdfPoint / convertToViewportPoint` 完全一致（8 种页面 × 5 个采样点，最大偏差 0.0000 pt）。换算逻辑收敛为**唯一一份纯函数**（`_internals.pdfCoordFromScreen / screenCoordFromPdf / makeGeom`），原型方法只是薄封装，杜绝公式副本漂移。
+- ⚠️ **历史缺陷（v4.9.0 及以前）**：`/Rotate 180` 与 `/Rotate 270` 的换算与渲染器约定不符 —— 因为**正反向互为逆运算**，界面上看起来完全正常（点哪画哪），但**导出的 JSON 坐标是镜像的**：后端按标准 PDF 坐标盖章时，章会跑到页面对侧（180° 页上下颠倒、270° 页左右错位）。自洽 ≠ 正确，这类 bug 只有拿权威实现做**绝对方向**对账才会暴露，见下方回归页。
 
 ---
 
@@ -623,14 +624,34 @@ pdf-stamp-picker/
 
 ```bash
 cd pdf-stamp-picker && python3 -m http.server 8899
-# 打开 http://127.0.0.1:8899/demo/index.html
+# 一键全量回归（推荐）：http://127.0.0.1:8899/demo/run-all.html
+# 主 Demo：http://127.0.0.1:8899/demo/index.html
 ```
 
 主 Demo 展示：容器模式（多用户多签章/三种模式/动态签署方/导入 JSON 回显）/ 纯画布模式 / 弹窗模式（确认校验）/ JSON 分组输出（含 document.hash）/ 工具栏配置。
 
+**一键全量浏览器回归**：`demo/run-all.html` 用 iframe 顺序跑下面所有页面（`edge90-sim-test.html` 跑默认与 `?strict=1` 两遍 → 共 7 个套件），输出 `7 个套件 · 109/109 条断言 · 25.5s` 这样的单一结论（任一页失败即汇总为 FAIL）。各页共用 `demo/test-harness.js`：`__TEST.start/expect/record/finish` + `__TEST.summary()`，结果挂在 `window.__RESULT__`；页面脚本抛错会被 harness 记为「未处理的 Promise 拒绝」——所以 `expect()` 的条数必须与 `record()` 实际条数一致，否则会被判成漏跑/多报。
+
+| 页面 | 覆盖 |
+|---|---|
+| `h1-lifecycle-test.html` | 加载生命周期：并发 load 串档、`abort()` 语义、失败上报 stage（16 条） |
+| `hash-nonsecure-test.html` | 哈希：安全上下文 / 内网 HTTP 纯 JS 兜底 / 纯 URL `hashUrl` 补算 / 20MB transfer 竞态（5 条） |
+| `edge90-sim-test.html` | Edge 90 兼容：默认自动兼容不提示；`?strict=1` 验证升级提示（各 6 条） |
+| `modal-retest.html` | 弹窗反复打开/取消，worker blob 复用不悬空 + 真实渲染（4 条） |
+| `coords-vs-pdfjs-test.html` | 坐标换算 vs pdf.js 权威实现（纯换算、无 DOM，4 旋转，失败时报出最差点，8 条） |
+| `rot-coords-e2e-test.html` | **真实 `load()` 路径**：8 种页面（旋转 0/90/180/270 × CropBox 原点 0 / 非零）+ 真实指针点击 → 落点 vs pdf.js，并回画校验（64 条） |
+
 框架集成测试页（均已实测运行）：`demo/angularjs-test.html`、`demo/vue2-test.html`、`demo/vue3-test.html`、`demo/react-test.html`。
 
-回归测试页：`demo/edge90-sim-test.html`（Edge 90 兼容）、`demo/modal-retest.html`（弹窗反复打开/取消，验证 worker blob 复用不悬空）。
+Node 侧（无浏览器）：
+```bash
+node test/coords.test.js   # 123 项：4 旋转 × 4 缩放往返 + 偏移 + 退化 + 绝对方向快照 + 单一真源守卫
+node test/json.test.js     # JSON 结构 / 按用户分组 / 旋转归一化 / 导入解析
+node test/docs.test.js     # 文档一致性：版本号、缓存戳、构造选项 ↔ README ↔ d.ts、事件、公开方法
+python3 test/gen_rotated_pdf.py   # 重新生成 demo/rot*.pdf 与 crop-rot*.pdf（手工 PDF 字节，零依赖）
+```
+
+> 测试基建注意：demo 页的库引用与 `test-harness.js` 都带 `?v=<版本>` 缓存戳，改库/改 harness 后必须同步升版本号，否则浏览器会用旧文件、测试假通过/假失败。
 
 ---
 
