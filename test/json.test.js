@@ -220,7 +220,7 @@ assert.strictEqual(cm2.length, _localCandidates('https://a.com/apps/index.html',
   '每个 pdf.min.js 候选恰好对应一个 cMaps 目录候选（不多不少）');
 
 // query/hash 必须被剥掉（否则 HEAD 的 URL 带着 ?lang=zh）
-assert.strictEqual(_cmapCandidates(['https://a.com/x/vendor/pdf.min.js?v=4.9.6#a'])[0], 'https://a.com/x/vendor/cMaps/');
+assert.strictEqual(_cmapCandidates(['https://a.com/x/vendor/pdf.min.js?v=4.9.7#a'])[0], 'https://a.com/x/vendor/cMaps/');
 
 // 边界：空输入 / 无斜杠 / 空项 → 返回空数组而不是抛错或产出垃圾
 assert.deepStrictEqual(_cmapCandidates([]), []);

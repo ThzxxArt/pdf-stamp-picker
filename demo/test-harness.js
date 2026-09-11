@@ -23,6 +23,7 @@
   var state = {
     page: (location.pathname.split('/').pop() || '').replace(/\.html$/, ''),
     title: document.title,
+    keepPageTitle: false,   // true = 不覆盖 <title>，结果画进页内角标（见 __TEST.start 的 opts）
     status: 'running',      // running | done | error
     expected: null,         // 声明的断言条数（null = 不校验）
     total: 0,
@@ -45,21 +46,60 @@
     state.failed = state.total - state.passed;
   }
 
-  function updateTitle() {
-    if (state.status === 'running') { document.title = (state.title || '') + ' …running'; return; }
+  /** 把当前结果渲染成一行文本；ok 只在跑完时有意义（null = 运行中） */
+  function resultInfo() {
+    if (state.status === 'running') return { ok: null, text: (state.title || '') + ' …running' };
     var bad = state.failed;
     // 漏跑检测：声明了条数却对不上，同样算失败（防止"少测了"被当作全绿）
     if (state.expected !== null && state.total !== state.expected) bad += 1;
-    document.title = (bad === 0 ? 'PASS ' : 'FAIL ') + state.passed + '/' + state.total +
-      (state.expected !== null ? ' (expect ' + state.expected + ')' : '') +
-      ' — ' + state.page;
+    return {
+      ok: bad === 0,
+      text: (bad === 0 ? 'PASS ' : 'FAIL ') + state.passed + '/' + state.total +
+        (state.expected !== null ? ' (expect ' + state.expected + ')' : '') +
+        ' — ' + state.page
+    };
+  }
+
+  /** 结果输出的**唯一出口**：正常走 <title>，展示页走页内角标（见 start 的 opts.keepTitle） */
+  function updateTitle() {
+    var r = resultInfo();
+    if (state.keepPageTitle) { renderBadge(r); return; }
+    document.title = r.text;
+  }
+
+  /** 页内右下角固定角标：展示页保住自己的 <title> 后，跑分仍要让人看得见 */
+  function renderBadge(r) {
+    var el = document.getElementById('__harness-badge');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = '__harness-badge';
+      /* 两个关键约束：
+         ① position:fixed —— 固定定位的盒子不参与文档的可滚动溢出区，
+            否则会污染响应式套件（⑰）的"窄视口下页面不该横向溢出"判定
+         ② pointer-events:none —— 点击穿透，不会挡住画布上的指针事件套件（⑫ 等） */
+      el.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:2147483647;' +
+        'pointer-events:none;font:600 12px/1.4 ui-monospace,Menlo,Consolas,monospace;' +
+        'padding:4px 8px;border-radius:6px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.35);' +
+        'max-width:calc(100vw - 16px);overflow-wrap:anywhere;white-space:normal;text-align:right';
+      (document.body || document.documentElement).appendChild(el);
+    }
+    el.textContent = r.text;
+    el.style.background = r.ok === null ? 'rgba(17,17,17,.86)'
+      : (r.ok ? 'rgba(11,110,60,.92)' : 'rgba(160,25,25,.92)');
   }
 
   window.__TEST = {
     /** 长文本容器名单（与注入的样式规则同源）—— 响应式套件的探针据此选宿主 */
     LONG_TEXT_SEL: LONG_TEXT_SEL,
-    start: function (title) {
-      if (title) { state.title = title; document.title = title; }
+    /** 启动套件。
+     *  opts.keepTitle = true → **不覆盖 document.title**，改把结果画进页内右下角标。
+     *  给"既是展示页、又是回归套件"的页面用（目前 index.html）：该页的 <title> 是要给人认
+     *  产品的（也承担版本号展示位，docs.test.js 会对账），不该被跑分长期占用。
+     *  纯测试页保持默认 false —— 直接开一堆标签时扫一眼标题就知道谁挂了。
+     *  注意 run-all 聚合器读的是 window.__RESULT__，**不依赖 <title>**，所以这里怎么选都不影响回归。 */
+    start: function (title, opts) {
+      state.keepPageTitle = !!(opts && opts.keepTitle);
+      if (title) { state.title = title; if (!state.keepPageTitle) document.title = title; }
       updateTitle();
       return state;
     },

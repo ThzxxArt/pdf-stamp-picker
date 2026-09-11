@@ -660,7 +660,7 @@ await picker.load(file)
 | `PdfStampPicker.openModal(config)` | 打开弹窗版选择器 |
 | `PdfStampPicker.loadPdfJs(opts)` | 从指定 URL 加载 pdf.js |
 | `PdfStampPicker.loadPdfJsAuto(opts)` | **本地优先、CDN 兜底**加载 pdf.js（含 fetch + Blob 兜底，绕开内网 strict MIME） |
-| `PdfStampPicker.version` | 版本号字符串（如 `'4.9.6'`） |
+| `PdfStampPicker.version` | 版本号字符串（如 `'4.9.7'`） |
 
 ### 12.13 事件清单
 
@@ -717,4 +717,4 @@ await picker.load(file)
 - **worker fetch + Blob 加载对所有浏览器生效**（v4.8.24 起）：不仅旧内核，现代浏览器的 `new Worker()` 也会因内网 `nosniff`/错误 MIME 被拒，故 worker 统一 fetch 源码 → Blob URL 绕开 strict MIME checking。**前提：内网 `vendor/` 三文件（pdf.min.js + pdf.worker.min.js + cMaps/）必须 HTTP 200 可达**
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 - 坐标：PDF 原生 pt、原点左下、自动补偿页面旋转——对接任何签章服务前先对齐坐标约定（README 有换算公式）
-- 当前版本 v4.9.6：默认签章模式 · JSON 分组输出/含图导出（`includeImage`）/导入反显（`importJSON` / 弹窗传 `json`）· `document.hash`（SHA-256 文件指纹）· 撤销重做（含**交互分组** `beginHistoryGroup`）· 多签署方动态管理 · 章固定大小 + 边界间距（`stampMargin`）· 工具栏按钮可配置（`toolbar`）· 弹窗校验（`requireStamp` / `requireAllUsers`）· 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线 · **旧浏览器自动兼容（compatCheck 默认 false，polyfill 兜底 Edge 90 可用）** · **内网严格 MIME 自动兜底（pdf.min.js + worker 均 fetch+Blob，v4.8.24）** · **签章尺寸单位为 PDF pt（v4.9.4：`stampSize` 与画布点击放置完全一致，不随窗口宽度/缩放漂移）** · **窄容器自动堆叠（v4.9.5：容器宽度 < 620px 时签章列表移到画布下方，画布不再被 248px 侧栏挤瘪）** · **v4.9.6 缺陷根治批次：撤销/重做改为派发真实增量事件（宿主副本不漂移）· 同一次失败只派发一次 `error` · `error.stage` 收敛为封闭集合 · 动态删用户进历史 · 加载失败不再产生未捕获 Promise 拒绝 + `_lastError` 可读 · `pickerOptions.users/currentUser` 不再被静默覆盖 · 导入路径 payload 与程序化路径同形 · cMaps 与探测到的 pdf.min.js 同目录 · destroy 后全部方法空操作（含返回 Promise 的）· 库头/d.ts 版本戳纳入机器对账**
+- 当前版本 v4.9.7：默认签章模式 · JSON 分组输出/含图导出（`includeImage`）/导入反显（`importJSON` / 弹窗传 `json`）· `document.hash`（SHA-256 文件指纹）· 撤销重做（含**交互分组** `beginHistoryGroup`）· 多签署方动态管理 · 章固定大小 + 边界间距（`stampMargin`）· 工具栏按钮可配置（`toolbar`）· 弹窗校验（`requireStamp` / `requireAllUsers`）· 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线 · **旧浏览器自动兼容（compatCheck 默认 false，polyfill 兜底 Edge 90 可用）** · **内网严格 MIME 自动兜底（pdf.min.js + worker 均 fetch+Blob，v4.8.24）** · **签章尺寸单位为 PDF pt（v4.9.4：`stampSize` 与画布点击放置完全一致，不随窗口宽度/缩放漂移）** · **窄容器自动堆叠（v4.9.5：容器宽度 < 620px 时签章列表移到画布下方，画布不再被 248px 侧栏挤瘪）** · **v4.9.6 缺陷根治批次：撤销/重做改为派发真实增量事件（宿主副本不漂移）· 同一次失败只派发一次 `error` · `error.stage` 收敛为封闭集合 · 动态删用户进历史 · 加载失败不再产生未捕获 Promise 拒绝 + `_lastError` 可读 · `pickerOptions.users/currentUser` 不再被静默覆盖 · 导入路径 payload 与程序化路径同形 · cMaps 与探测到的 pdf.min.js 同目录 · destroy 后全部方法空操作（含返回 Promise 的）· 库头/d.ts 版本戳纳入机器对账** · **v4.9.7 测试基建：展示页的标签标题不再被回归框架覆盖（`__TEST.start(title, { keepTitle: true })`，跑分改写页内右下角固定角标，`position:fixed` + `pointer-events:none` 以免污染响应式/指针套件）；纯测试页仍用标签标题，便于开一堆标签扫一眼谁挂了**

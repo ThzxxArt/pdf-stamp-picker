@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PdfStampPicker v4.9.6 — 电子签章坐标选择器 Demo</title>
+<title>PdfStampPicker v4.9.7 — 电子签章坐标选择器 Demo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif; background: #f0f2f5; color: #202124; height: 100vh; display: flex; flex-direction: column; }
@@ -70,7 +70,7 @@
 <body>
 <header>
   <div class="logo">🖊</div>
-  <h1>PdfStampPicker <span class="tag">单文件 · 零依赖 · 坐标选择器</span><span class="ver" id="ver-tag">v4.9.6</span></h1>
+  <h1>PdfStampPicker <span class="tag">单文件 · 零依赖 · 坐标选择器</span><span class="ver" id="ver-tag">v4.9.7</span></h1>
   <nav class="tabs">
     <button id="tab-container" class="active">容器模式</button>
     <button id="tab-canvas">纯画布</button>
@@ -101,7 +101,7 @@
   </aside>
 </main>
 
-<script src="../pdf-stamp-picker.js?v=4.9.6"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.7"></script>
 <script>
 // pdf.js 由库自动探测加载（与真实项目一致：库自动找同目录 vendor/pdf.min.js）
 
@@ -382,14 +382,17 @@ document.getElementById('tab-modal').addEventListener('click', () => {
 
 initContainerMode();
 </script>
-<script src="test-harness.js?v=4.9.6"></script>
+<script src="test-harness.js?v=4.9.7"></script>
 <script>
 /* 主展示页自动回归（run-all 套件 ⑫）
    此前这一页**完全在自动回归之外**，只能人肉点开看 —— 而它恰恰是唯一同时覆盖
    "容器模式 / 纯画布模式 / 弹窗模式"三条主路径的页面，欠账只是被"每轮人工验一遍"掩盖着。 */
 (function () {
   var N = '主展示页';
-  __TEST.start('主展示页 index.html（自动回归）');
+  /* keepTitle：本页既是展示页又是回归套件（⑫），标签标题留给产品名/版本号，
+     跑分结果改画进右下角角标 —— 之前 <title> 被覆盖成「PASS 8/8 …」，
+     打开 demo 的人认不出这是什么页面。聚合器读 __RESULT__，不受影响。 */
+  __TEST.start('主展示页 index.html（自动回归）', { keepTitle: true });
   __TEST.expect(8);
   function rec(n, pass, detail) { __TEST.record(N + '：' + n, pass, detail); }
   var hash1 = '';

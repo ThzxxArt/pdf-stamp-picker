@@ -649,6 +649,8 @@ cd pdf-stamp-picker && python3 -m http.server 8899
 
 **一键全量浏览器回归**：`demo/run-all.html` 用 iframe 顺序跑下面所有页面（`edge90-sim-test.html` 跑默认与 `?strict=1` 两遍 → 共 17 个套件），输出 `17 个套件 · 252/252 条断言 · 55s` 这样的单一结论（任一页失败即汇总为 FAIL）。各页共用 `demo/test-harness.js?v=<版本>`：`__TEST.start/expect/record/finish` + `__TEST.summary()`，结果挂在 `window.__RESULT__`；页面脚本抛错会被 harness 记为「未处理的 Promise 拒绝」——所以 `expect()` 的条数必须与 `record()` 实际条数一致，否则会被判成漏跑/多报。跑完所有套件后，聚合器还会做一次**跨套件对账**（2 条，见下）：各页各自独立加载同一份 PDF 算出的 `document.hash` 与页数必须完全一致 —— 过去这一步只能靠人肉打开 5 个页面比对 hash。
 
+> **结果写哪里：`<title>` vs 页内角标。** 默认（纯测试页）harness 把 `PASS 8/8 (expect 8) — index` 这类结果写进 `document.title`，好处是同时开一堆标签时扫一眼就知道谁挂了。但"既是展示页、又是回归套件"的页面不能这么干——`index.html` 的 `<title>` 是要给人认产品的，且承担版本号展示位。这类页面用 `__TEST.start('标题', { keepTitle: true })`：**不碰 `<title>`**，结果改画进右下角固定角标（`position:fixed` 不参与文档溢出区、`pointer-events:none` 点击穿透，故不影响响应式套件⑰与指针事件套件⑫）。当前只有 `index.html` 使用该项。**聚合器读的是 `window.__RESULT__`，与 `<title>` 无关**，所以两种模式都不影响 `run-all.html`。
+
 > 本节的**套件清单与条数由 `test/docs.test.js` 自动校验**（与 `run-all.html` 的 `SUITE`、各页 `__TEST.expect()` 对账）——避免"加了套件忘了写文档 / 条数写错"这类滞后。
 
 | 页面 | 覆盖 |

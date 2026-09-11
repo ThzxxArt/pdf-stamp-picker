@@ -1,4 +1,4 @@
-// TypeScript declarations for PdfStampPicker v4.9.6
+// TypeScript declarations for PdfStampPicker v4.9.7
 
 export type PickerMode = 'point' | 'rect' | 'stamp';
 export type PickerZoom = number | 'fit-width' | 'fit-page';
