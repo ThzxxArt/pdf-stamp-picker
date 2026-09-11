@@ -108,7 +108,7 @@ function mkInst(seed) {
 /* 6. ★ 唯一来源：toJSON 与 toFlatJSON 的 document 块字段集合一致
       （generatedAt 每次不同，比字段名不比值） */
 {
-  const p = mkInst({ _docName: 'x.pdf', _totalPages: 2, _pdfHash: 'fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac' });
+  const p = mkInst({ _docName: 'x.pdf', _totalPages: 2, _pdfHash: 'f597560249c4154c56cce201f40ad506dd8de378e723f89810c53d0306127b8b' });
   const keysOf = (d) => Object.keys(d).sort().join(',');
   assert.strictEqual(keysOf(p.toJSON().document), keysOf(p.toFlatJSON().document));
   // 哈希信息三件套也不能只在一边出现（历史上扁平版完全没有 hash）

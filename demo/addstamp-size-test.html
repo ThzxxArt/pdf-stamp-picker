@@ -84,7 +84,12 @@
     var p1 = await mk({});
     var base = overlayInk(p1);
     var st1 = p1.addStamp({ x: W / 2, y: H / 2 });
-    await sleep(200);                                  // 等章图 onload + rAF 重绘
+    /* ★ 不用固定的 sleep(200) 猜时间：夹具换成完整合同 PDF（3 页正文 + 内嵌中文字体）后，
+       首个实例的"章图 onload → rAF 重绘"在高负载下会被推迟，固定等待会让 ink1 偶尔量到 0
+       （实测：全量跑里 18/20，同页单跑 20/20）。改成等"墨迹真的出现"这个【真实条件】。
+       超时不挂 promise，而是让 ink1 保持实测值、由下面的断言报出真值并给出超时提示。 */
+    var inkSettled = await __TEST.waitFor(function () { return overlayInk(p1) - base > 3000; }, 4000,
+      '① 缺省章图落墨（等 rAF 重绘而非猜时间）').then(function () { return true; }, function () { return false; });
     var ink1 = overlayInk(p1) - base;
 
     rec('① 缺省 width/height 不为 0（不是空章）',
@@ -94,7 +99,7 @@
     rec('① 缺省高度按章图比例（方形内置章 → h≈w）',
       Math.abs(st1.height - st1.width) <= 0.5, 'w=' + st1.width + ' h=' + st1.height);
     rec('① 缺省尺寸放置后画布确实出现章图墨迹（验证"看得见"）',
-      ink1 > 3000, '墨迹增量=' + ink1 + ' px');
+      ink1 > 3000, '墨迹增量=' + ink1 + ' px' + (inkSettled ? '' : '（等落墨超时 4000ms）'));
     /* ★ 第二处根因的守卫：只设 _activeId 不同步 _sel 时，_paint 认为"活动签章由选区渲染器画"，
        而选区渲染器因 _sel 为空根本不执行 → 画布 0 像素、getSelection() 也是 null。 */
     rec('① addStamp 后选区与活动签章同步（getSelection() 不再为 null）',

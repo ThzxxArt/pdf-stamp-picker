@@ -155,8 +155,8 @@ assert.throws(() => parseImportJSON(null), /需要 JSON 对象/);
 console.log('=== v4 单测全部通过（按用户分组/多用户多签章/扁平兼容/无图片/本地候选探测/导入解析） ===');
 
 // --- v4.7.7: document.hash 输出 ---
-const docWithHash = buildJSON({ docName: 'a.pdf', totalPages: 1, currentPage: 1, width: 100, height: 200, rotation: 0, offsetX: 0, offsetY: 0, hash: 'fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac' }, [], []);
-assert.strictEqual(docWithHash.document.hash, 'fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac');
+const docWithHash = buildJSON({ docName: 'a.pdf', totalPages: 1, currentPage: 1, width: 100, height: 200, rotation: 0, offsetX: 0, offsetY: 0, hash: 'f597560249c4154c56cce201f40ad506dd8de378e723f89810c53d0306127b8b' }, [], []);
+assert.strictEqual(docWithHash.document.hash, 'f597560249c4154c56cce201f40ad506dd8de378e723f89810c53d0306127b8b');
 assert.strictEqual(docWithHash.document.hashAlgorithm, 'SHA-256');
 // 无 hash 时不输出
 const docNoHash = buildJSON({ docName: 'a.pdf', totalPages: 1, currentPage: 1, width: 100, height: 200, rotation: 0, offsetX: 0, offsetY: 0 }, [], []);

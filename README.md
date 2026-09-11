@@ -341,7 +341,7 @@ picker.setCurrentUser('c');           // 后续新增的签章归属丙方
     "currentPage": 1,
     "pageSize": { "width": 595.28, "height": 841.89, "unit": "pt" },
     "rotation": 0,
-    "hash": "fa4f75211d968a4b5b6c232f32b604b2f915f83f732c5440c033f3b2a6f3f9ac",
+    "hash": "f597560249c4154c56cce201f40ad506dd8de378e723f89810c53d0306127b8b",
     "hashAlgorithm": "SHA-256",
     "hashStatus": "ready",
     "generatedAt": "2026-08-21T09:00:00.000Z"
@@ -621,10 +621,10 @@ pdf-stamp-picker/
 │   ├── edge90-sim-test.html # Edge 90 兼容回归测试（?strict=1 验证升级提示）
 │   ├── modal-retest.html   # 弹窗反复打开/取消回归测试（验证 worker blob 复用）
 │   ├── hash-nonsecure-test.html # 哈希回归：安全上下文/内网HTTP纯JS兜底/纯URL补算 4 场景
-│   ├── test.pdf             # 测试 PDF（3 页，含 /Rotate 90）
+│   ├── test.pdf             # 共用夹具：3 页《技术服务及履约保证三方协议》（中文子集嵌入、无 /Rotate）
 │   ├── eight-page.pdf       # 8 页测试 PDF（换文档验证）
 │   ├── chinese-cid.pdf      # 中文 GBK CID 测试 PDF（验证 cMaps）
-│   └── gen_*.py             # 测试 PDF 生成脚本
+│   └── gen_*.py             # 测试 PDF 生成脚本（gen_contract_pdf.py 生成 test.pdf）
 ├── vendor/                  # pdf.js + 框架库（测试用；库零依赖铁律保持）
 │   ├── pdf.min.js           # pdf.js 主库（320KB）
 │   ├── pdf.worker.min.js    # 解析 worker（1.08MB）
@@ -670,7 +670,7 @@ cd pdf-stamp-picker && python3 -m http.server 8899
 | `angularjs-test.html` | AngularJS 1.8 集成（指令模式，实例挂 `$rootScope`）：同一份断言契约（9 条） |
 | `responsive-pages-test.html` | **测试页自身的窄视口可用性**：以 370px 真实加载 5 个代表页，检查①实载内容无横向溢出 ②注入 64 位 hash 长串后仍能断行（**带正控**，见下）③viewport meta（16 条） |
 
-跨套件对账（聚合器在所有套件跑完后执行，2 条）：16 个入口各自独立加载 `test.pdf`，`document.hash` 必须全部相同（实测 `fa4f75211d96…`）、页数必须全部为 3 —— 任何一处"文档没加载出来/算的是别的字节/实例串档"都会在这里暴露。上报链路本身也有守卫：上报套件数 < 2 时判**失败**而不是跳过（否则"大家都忘了上报"会伪装成"对账通过"）。
+跨套件对账（聚合器在所有套件跑完后执行，2 条）：16 个入口各自独立加载 `test.pdf`，`document.hash` 必须全部相同（实测 `f597560249c4…`）、页数必须全部为 3 —— 任何一处"文档没加载出来/算的是别的字节/实例串档"都会在这里暴露。上报链路本身也有守卫：上报套件数 < 2 时判**失败**而不是跳过（否则"大家都忘了上报"会伪装成"对账通过"）。
 
 > 框架集成页（Vue 2/3、React、AngularJS）此前**完全在自动回归之外**，只能人肉打开看日志；现由 `__TEST.frameworkSmoke()` 统一收口，4 页共享同一断言契约，新增框架页只需一行调用。
 
@@ -684,10 +684,15 @@ node test/docs.test.js       # 文档一致性：版本号（库/包/缓存戳/�
 node test/history.test.js    # 25 项：交互分组语义（一次按住=一步 / 不冲爆栈 / 跨 key 不合并 / 重置清理）
 node test/addstamp.test.js   # 15 组：addStamp 缺省尺寸、point 模式 0×0、显示尺寸 = 物理 × cssScale、选区同步
 node test/docmeta.test.js    # 10 组：getDocName/getTotalPages 的三出口同源与归零语义
+python3 demo/gen_contract_pdf.py  # 重新生成 demo/test.pdf（逐字节可复现；需 apk add py3-fonttools font-wqy-zenhei）
 python3 test/gen_rotated_pdf.py   # 重新生成 demo/rot*.pdf 与 crop-rot*.pdf（手工 PDF 字节，零依赖）
 ```
 
 > 测试基建注意：demo 页的库引用与 `test-harness.js` 都带 `?v=<版本>` 缓存戳，改库/改 harness 后必须同步升版本号，否则浏览器会用旧文件、测试假通过/假失败。
+
+> **必须用 `test/devserver.py` 起服务**：`python3 test/devserver.py 8899`（根是仓库的上一级，所以 URL 形如 `http://127.0.0.1:8899/pdf-stamp-picker/demo/run-all.html`）。不要用 `python3 -m http.server` —— 它不带 `Cache-Control: no-store`，Chrome 会对静态资源按 `Last-Modified` 做**启发式缓存**；换掉夹具后浏览器可能直接吃旧副本、**连源都不回**，表现为"哈希套件算出的还是上一版 `test.pdf` 的哈希"。实测踩过：夹具从 2.5KB 的旧样例换成 107KB 的合同后，全量跑 252→249，且对账段异口同声报**旧哈希**（因为所有入口都读到了同一份陈旧缓存）。**换端口即可解**（换 origin = 换缓存分区）。
+
+> **`demo/test.pdf` 是共用夹具**（3 页《技术服务及履约保证三方协议》），由 `demo/gen_contract_pdf.py` 生成，**逐字节可复现**（子集字体的 `head.modified` 固定、关闭 `recalcTimestamp`；否则 fontTools 每次写入当前时间，同一输入每次产出都不同）。改正文内容后必须同步哈希，生成脚本结尾会打印新值：① `hash-nonsecure-test.html` 的 `EXPECT` ② 上一段 README 里的实测值 ③ `test/json.test.js` 与 `test/docmeta.test.js` 中的样例值。另：`demo/gen_test_pdf.py`（旧的 2.5KB 旋转样例生成器）已被它取代并删除 —— 两个脚本都往同一路径写、内容互不兼容，留着就是地雷。
 
 ---
 
