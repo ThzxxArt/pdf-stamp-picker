@@ -160,6 +160,57 @@ const notDeclared = publicMethods.filter(x => !dtsMethods.has(x));
 check('全部公开方法已在 d.ts 声明', notDeclared.length === 0,
   notDeclared.length ? '缺：' + notDeclared.join(', ') : publicMethods.length + ' 个公开方法');
 
+/* ---------- 5. README 方法表 ---------- */
+section('5. 公开方法与 README 方法表');
+/* 按「未转义的 |」切分单元格：README 里写 `setMode('point'\|'rect')`，
+   直接 split('|') 会把 \| 也当分隔符 → 取错单元格 → 解析出一堆空名 → 断言假通过。
+   （实测踩到：初版探针因此漏报 setMode 并误报静态表全缺。） */
+function cellsOf(line) {
+  return line.replace(/\\\|/g, '\u0001').split('|').map(c => c.replace(/\u0001/g, '|'));
+}
+/* 从反引号里取「调用签名」的方法名：`f(x)` → f；支持一格多方法 `a()` / `b()` */
+function calledNames(cell) {
+  const out = [];
+  const re = /`([^`]+)`/g;
+  let mm;
+  while ((mm = re.exec(cell)) !== null) {
+    const g = /^([a-zA-Z_$][\w$]*)\s*\(/.exec(mm[1].trim());
+    if (g) out.push(g[1]);
+  }
+  return out;
+}
+const readmeInstMethods = new Set();
+sliceSection(README, '### 实例方法').split('\n').forEach(line => {
+  if (!/^\|/.test(line)) return;
+  calledNames(cellsOf(line)[2] || '').forEach(n => readmeInstMethods.add(n));
+});
+const staticNames = new Set();
+const stRe = /PdfStampPicker\.([a-zA-Z_$][\w$]*)\s*=/g;
+while ((km = stRe.exec(SRC))) if (km[1] !== 'prototype' && km[1][0] !== '_') staticNames.add(km[1]);
+const readmeStaticMembers = new Set();
+sliceSection(README, '### 静态成员').split('\n').forEach(line => {
+  if (!/^\|/.test(line)) return;
+  const re = /`PdfStampPicker\.([a-zA-Z_$][\w$]*)/g;
+  let mm;
+  while ((mm = re.exec(cellsOf(line)[1] || '')) !== null) readmeStaticMembers.add(mm[1]);
+});
+
+/* 解析自检：解析器一旦悄悄退化（返回空集），下面的「没有缺漏」就变成永远成立 —— 假通过。
+   因此先断言"确实解析到了预期量级的东西"。（历史上正是断言写错掩盖了真 bug。） */
+check('README 实例方法表可解析（≥40 项）', readmeInstMethods.size >= 40, readmeInstMethods.size + ' 项');
+check('README 静态成员表可解析（≥4 项）', readmeStaticMembers.size >= 4, readmeStaticMembers.size + ' 项');
+
+const missInReadmeMethods = publicMethods.filter(x => !readmeInstMethods.has(x));
+const extraInReadmeMethods = [...readmeInstMethods].filter(x => !publicMethods.includes(x));
+check('全部公开方法已写进 README 方法表', missInReadmeMethods.length === 0,
+  missInReadmeMethods.length ? '缺：' + missInReadmeMethods.join(', ') : publicMethods.length + ' 个公开方法');
+check('README 方法表没有多余/非公开方法', extraInReadmeMethods.length === 0, extraInReadmeMethods.join(', '));
+
+const missInReadmeStatics = [...staticNames].filter(x => !readmeStaticMembers.has(x));
+const extraInReadmeStatics = [...readmeStaticMembers].filter(x => !staticNames.has(x));
+check('全部静态成员已写进 README 静态成员表', missInReadmeStatics.length === 0, missInReadmeStatics.join(', '));
+check('README 静态成员表没有多余项', extraInReadmeStatics.length === 0, extraInReadmeStatics.join(', '));
+
 /* ---------- 汇总 ---------- */
 console.log('\n=== 文档一致性：' + passed + '/' + (passed + failed) + ' 通过 ===');
 if (failed) { console.log('（' + failed + ' 项不一致，请修正文档或代码）'); process.exit(1); }

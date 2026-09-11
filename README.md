@@ -320,6 +320,9 @@ picker.setCurrentUser('c');           // 后续新增的签章归属丙方
 
 ### 输出结构（按用户分组）
 
+> `document.pages` 为 **0 表示"当前没有文档"**（未加载 / 已取消 / 加载失败），不是"0 页"。
+> 需要单独取这两个字段时用 `picker.getDocName()` / `picker.getTotalPages()`（同样来源，省掉构建整份 JSON 的开销）。
+
 ```jsonc
 {
   "document": {
@@ -504,6 +507,7 @@ new PdfStampPicker('#stage', { toolbar: false });
 | | `loadPDF(source, opts)` | 兼容旧名（同 `load`） |
 | | `abort()` | 中止当前加载（在途请求 + 后续渲染/哈希链），`load()` 以 `AbortError` 结束 |
 | | `getHash()` | `Promise<string\|null>` 等待并取得 PDF 的 SHA-256（`hashUrl` 补算场景用） |
+| | `getDocName()` / `getTotalPages()` | 当前文档名 / 总页数（与 `toJSON().document` 同源）。**未加载文档时分别返回 `''` 和 `0`** —— `0` 表示"没有文档"，不是"0 页" |
 | | `setPage(meta)` | 纯画布模式：`{canvas, width, height, rotation, pageNumber, totalPages, name}` |
 | | `gotoPage(n)` | 翻页（Promise），自动补偿旋转；错误正确传播（不掩盖真实失败原因） |
 | **缩放** | `setZoom(z)` / `getZoom()` | 数字 / `'fit-width'` / `'fit-page'`；获取当前缩放 |
@@ -528,7 +532,8 @@ new PdfStampPicker('#stage', { toolbar: false });
 | | `toFlatJSON({includeImage})` | 扁平版（stamps[] 内嵌 user） |
 | | `importJSON(json, opts)` | 从 JSON 反显（`users[]` 或 `stamps[]` 均可） |
 | | `copyJSON()` | 复制 JSON 到剪贴板（内置 toast） |
-| **撤销** | `undo()` / `redo()` | 撤销/重做（Ctrl+Z / Ctrl+Shift+Z，上限 `historyLimit`，默认 50 步）。**历史粒度 = 一次交互**：一次拖拽 / 一次按住方向键只占一步（`beginHistoryGroup(key)` / `endHistoryGroup()` 供自定义交互复用） |
+| **撤销** | `undo()` / `redo()` | 撤销/重做（Ctrl+Z / Ctrl+Shift+Z，上限 `historyLimit`，默认 50 步）。**历史粒度 = 一次交互**：一次拖拽 / 一次按住方向键只占一步 |
+| | `beginHistoryGroup(key)` / `endHistoryGroup()` | 自定义交互的分组边界（公开 API）：同一 key 内的连续变更合并为一步；`endHistoryGroup()` 结束分组，`undo()/redo()` 或换 key 会自动切断合并 |
 | **面板** | `toggleList()` | 折叠/展开签章列表面板 |
 | **导出** | `exportImage(opts)` | 导出当前页+签章布局为 PNG：`{scale=2, includePdf=true, includeUi=false}`；`includePdf:false` 得透明底章图 |
 | **坐标** | `screenToPdf(x,y)` / `pdfToScreen(x,y)` | 屏幕 px ↔ PDF pt（含旋转补偿） |

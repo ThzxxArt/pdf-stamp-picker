@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>文档元信息 getter 回归测试（getDocName / getTotalPages）</title>
+<style>
+body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
+#log div{padding:2px 0}
+.ok{color:#4ade80}.bad{color:#f87171}.info{color:#93c5fd}.sec{margin-top:8px;font-weight:700;color:#93c5fd}
+#stage{position:absolute;left:-9999px;width:400px;height:600px}
+</style>
+</head>
+<body>
+<h2>PdfStampPicker 文档元信息 getter 回归测试</h2>
+<p class="info" id="ver"></p>
+<div id="log"></div>
+<div id="stage"></div>
+<script src="../pdf-stamp-picker.js?v=4.9.3"></script>
+<script src="test-harness.js?v=4.9.3"></script>
+<script>
+/* ============================================================================
+ * 被验证的接口（v4.9.3 新增）：getDocName() / getTotalPages()
+ *
+ * 过去要读"当前文档名/页数"只能 picker.toJSON().document —— 为两个字段构建整份 JSON
+ * （含全部签章，includeImage 时还含 dataURL）。
+ *
+ * 本页在**真实加载生命周期**里验证三件靠单测测不出来的事：
+ *   1. 未加载文档时必须报 0 / ''（0 = "没有文档"，不能谎报 1 页）；
+ *   2. 取消（abort 在途加载）、加载失败、换文档之后必须**同步归零/更新**，
+ *      不能把上一份文档的页数/名字串过来（本项目 D2/D3/D12 类"状态残留"热区）；
+ *   3. getter 与 toJSON/toFlatJSON 三个出口读数必须一致（防止将来只改一处）。
+ * 页数的"权威值"直接取 pdf.js 自己报的 doc.numPages 对账，不硬编码数字
+ * （硬编码会在换测试 PDF 时悄悄失真）。
+ * ========================================================================== */
+(function () {
+  var log = document.getElementById('log');
+  function say(msg, cls) {
+    var d = document.createElement('div');
+    d.className = cls || '';
+    d.textContent = msg;
+    log.appendChild(d);
+  }
+  function rec(name, pass, detail) { __TEST.record(name, pass, detail); say((pass ? '✅ ' : '❌ ') + name + ' — ' + detail, pass ? 'ok' : 'bad'); }
+  function section(t) { say('■ ' + t, 'sec'); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function mk(opts) {
+    var el = document.createElement('div');
+    el.style.cssText = 'width:400px;height:600px';
+    document.getElementById('stage').appendChild(el);
+    return { p: new PdfStampPicker(el, opts || {}) };
+  }
+  function isAbort(e) { return !!(e && (e.name === 'AbortError' || e.superseded)); }
+
+  /* 权威页数：直接用 pdf.js 打开同一个文件，问它 numPages（外部权威锚点） */
+  async function authoritativePages(url) {
+    var doc = await window.pdfjsLib.getDocument(url).promise;
+    var n = doc.numPages;
+    try { doc.destroy(); } catch (e) {}
+    return n;
+  }
+
+  (async function () {
+    __TEST.start('文档元信息 getter 回归测试');
+    /* ①4 + ②5 + ③3 + ④4 + ⑤4 + ⑥2 + ⑦2 + 注入器自检 1 = 25 */
+    __TEST.expect(25);
+
+    try {
+      await PdfStampPicker.loadPdfJsAuto();
+    } catch (e) {
+      rec('pdf.js 加载', false, e.message);
+      __TEST.finish(); return;
+    }
+    document.getElementById('ver').textContent = 'pdf.js v' + (window.pdfjsLib.version || '?');
+
+    /* ---- ① 初始（未加载任何文档）：4 条 ---- */
+    section('① 初始：未加载文档（0 ≠ 1）');
+    var A = mk();
+    rec('①-1 未加载时 getTotalPages() === 0', A.p.getTotalPages() === 0, 'getTotalPages()=' + A.p.getTotalPages());
+    rec('①-2 未加载时 getDocName() === \'\'', A.p.getDocName() === '', 'getDocName()=' + JSON.stringify(A.p.getDocName()));
+    var j0 = A.p.toJSON();
+    rec('①-3 未加载时 JSON 也报 0（三个出口不打架）',
+      j0.document.pages === 0 && j0.document.name === '',
+      'document.pages=' + j0.document.pages + ' name=' + JSON.stringify(j0.document.name));
+    rec('①-4 0 与"1 页文档"可区分（0 表示没有文档）',
+      A.p.getTotalPages() !== 1, '未加载=' + A.p.getTotalPages() + '，1 页文档应为 1');
+
+    /* ---- ② 加载成功后：5 条 ---- */
+    section('② 加载 test.pdf 后');
+    var authPdf = await authoritativePages('test.pdf');
+    await A.p.load('test.pdf');
+    rec('②-1 页数与 pdf.js 权威值一致', A.p.getTotalPages() === authPdf,
+      'getTotalPages()=' + A.p.getTotalPages() + ' pdfjs.numPages=' + authPdf);
+    rec('②-2 文档名已就绪', /test\.pdf/.test(A.p.getDocName()), 'getDocName()=' + A.p.getDocName());
+    var j1 = A.p.toJSON();
+    rec('②-3 getter 与 toJSON().document 同源',
+      A.p.getTotalPages() === j1.document.pages && A.p.getDocName() === j1.document.name,
+      'pages ' + A.p.getTotalPages() + '/' + j1.document.pages + ' · name ' + A.p.getDocName() + '/' + j1.document.name);
+    var f1 = A.p.toFlatJSON();
+    rec('②-4 getter 与 toFlatJSON().document 同源',
+      A.p.getTotalPages() === f1.document.pages && A.p.getDocName() === f1.document.name,
+      'pages ' + A.p.getTotalPages() + '/' + f1.document.pages);
+    /* 已就绪实例上的 abort() 必须是【空操作】（h1 ⑪ 的语义，这里从 getter 侧再钉一次） */
+    A.p.abort();
+    rec('②-5 对已就绪实例 abort() 是空操作（元信息不变）',
+      A.p.getTotalPages() === authPdf && /test\.pdf/.test(A.p.getDocName()),
+      'pages=' + A.p.getTotalPages() + ' name=' + A.p.getDocName());
+
+    /* ---- ③ 换文档：3 条 ---- */
+    section('③ 换成 eight-page.pdf（不得串档）');
+    var authEight = await authoritativePages('eight-page.pdf');
+    await A.p.load('eight-page.pdf');
+    rec('③-1 页数跟随新文档', A.p.getTotalPages() === authEight,
+      'getTotalPages()=' + A.p.getTotalPages() + ' pdfjs.numPages=' + authEight);
+    rec('③-2 文档名跟随新文档', /eight-page\.pdf/.test(A.p.getDocName()), 'getDocName()=' + A.p.getDocName());
+    rec('③-3 没有串到上一份文档的页数',
+      authEight !== authPdf ? A.p.getTotalPages() !== authPdf : true,
+      '旧=' + authPdf + ' 新=' + authEight);
+
+    /* ---- ④ 在途加载被 abort：4 条 ---- */
+    section('④ 在途加载被 abort（延迟注入制造"确有在途"）');
+    /* ★ 必须用 __TEST.swapGlobalMethod：pdf.min.js 的 getDocument 是 webpack 只读 getter，
+       直接赋值会静默失败，本节的"确有在途加载"前提就没了。此原语装不上即抛错。 */
+    try {
+      __TEST.swapGlobalMethod('pdfjsLib', 'getDocument', function (real, holder) {
+        return function (cfg) {
+          var d = window.__delayOnce || 0;
+          window.__delayOnce = 0;
+          if (!d) return real.call(holder, cfg);
+          return { promise: new Promise(function (res, rej) { setTimeout(function () { real.call(holder, cfg).promise.then(res, rej); }, d); }) };
+        };
+      });
+      rec('④-0 延迟注入器安装成功（本节前提成立）', true, 'swapGlobalMethod 已自检');
+    } catch (e) {
+      rec('④-0 延迟注入器安装成功（本节前提成立）', false, '安装失败：' + e.message);
+      __TEST.finish(); return;
+    }
+    window.__delayOnce = 800;
+    var pending = A.p.load('test.pdf').then(function () { return null; }, function (e) { return e; });
+    await sleep(100);                      // 此刻确实在途（getDocument 被延迟 800ms）
+    A.p.abort();
+    var abortErr = await pending;
+    rec('④-1 在途 load() 以 AbortError 结束', isAbort(abortErr),
+      abortErr ? (abortErr.name + ': ' + abortErr.message) : '意外 resolve 了');
+    rec('④-2 取消后页数归零（无半成品文档）', A.p.getTotalPages() === 0, 'getTotalPages()=' + A.p.getTotalPages());
+    rec('④-3 取消后文档名清空', A.p.getDocName() === '', 'getDocName()=' + JSON.stringify(A.p.getDocName()));
+    var j2 = A.p.toJSON();
+    rec('④-4 取消后 JSON 同步归零', j2.document.pages === 0 && j2.document.name === '',
+      'pages=' + j2.document.pages + ' name=' + JSON.stringify(j2.document.name));
+
+    /* ---- ⑤ 加载失败：4 条 ---- */
+    section('⑤ 加载不存在的文件（失败也要归零）');
+    var failed = await A.p.load('__no_such_file__.pdf').then(function () { return null; }, function (e) { return e; });
+    rec('⑤-1 加载失败正确 reject', !!failed, failed ? String(failed.message || failed).slice(0, 60) : '意外 resolve');
+    rec('⑤-2 失败后页数归零', A.p.getTotalPages() === 0, 'getTotalPages()=' + A.p.getTotalPages());
+    rec('⑤-3 失败后文档名清空', A.p.getDocName() === '', 'getDocName()=' + JSON.stringify(A.p.getDocName()));
+    var j3 = A.p.toJSON();
+    rec('⑤-4 失败后 JSON 同步归零', j3.document.pages === 0 && j3.document.name === '',
+      'pages=' + j3.document.pages + ' name=' + JSON.stringify(j3.document.name));
+
+    /* ---- ⑥ 画布模式（setPage）：2 条 ---- */
+    section('⑥ 纯画布模式 setPage');
+    var B = mk();
+    var cv = document.createElement('canvas');
+    cv.width = 595; cv.height = 842;
+    B.p.setPage({ canvas: cv, width: 595, height: 842, rotation: 0, pageNumber: 1, totalPages: 5, name: 'canvas合同.pdf' });
+    rec('⑥-1 setPage 后 getter 反映画布文档',
+      B.p.getTotalPages() === 5 && B.p.getDocName() === 'canvas合同.pdf',
+      'pages=' + B.p.getTotalPages() + ' name=' + B.p.getDocName());
+    var cv2 = document.createElement('canvas');
+    cv2.width = 595; cv2.height = 842;
+    B.p.setPage({ canvas: cv2, width: 595, height: 842, rotation: 0, pageNumber: 1, name: 'canvas合同.pdf' });
+    rec('⑥-2 省略 totalPages 时回落 1 页（1 ≠ 无文档的 0）',
+      B.p.getTotalPages() === 1, 'getTotalPages()=' + B.p.getTotalPages());
+
+    /* ---- ⑦ 只读性与"不依赖签章"：2 条 ---- */
+    section('⑦ 只读性与独立性');
+    /* 只比较"应该稳定"的字段：document.generatedAt 每次构建都会写当前时间戳，
+       直接比整块 JSON 字符串必然不等 —— 那是断言写错，不是库有问题。 */
+    function stableDoc(p) {
+      var d = Object.assign({}, p.toJSON().document);
+      delete d.generatedAt;
+      return JSON.stringify(d);
+    }
+    var snap = stableDoc(B.p);
+    B.p.getTotalPages(); B.p.getTotalPages(); B.p.getDocName(); B.p.getDocName();
+    rec('⑦-1 getter 是纯读取（连续调用不改变状态）',
+      stableDoc(B.p) === snap && B.p.getTotalPages() === 1,
+      '文档块（除 generatedAt 外）前后一致');
+    rec('⑦-2 无签章时也能读元信息（不依赖签章存在）',
+      B.p.toFlatJSON().stamps.length === 0 && B.p.getTotalPages() === 1 && B.p.getDocName() === 'canvas合同.pdf',
+      'stamps=0 但 pages=1 name=' + B.p.getDocName());
+
+    __TEST.finish();
+    var s = __TEST.summary();
+    say('完成：' + s.passed + '/' + s.total + (s.status === 'done' ? ' ✅' : ' ❌'), 'sum');
+  })();
+})();
+</script>
+</body>
+</html>

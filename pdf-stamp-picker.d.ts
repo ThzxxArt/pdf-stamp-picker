@@ -269,6 +269,18 @@ export default class PdfStampPicker {
   getHash(): Promise<string | null>;
 
   /**
+   * 当前文档名；未加载任何文档时为 ''。
+   * 与 toJSON().document.name 同源，省掉构建整份 JSON 的开销。
+   */
+  getDocName(): string;
+
+  /**
+   * 当前文档总页数；**未加载任何文档时为 0**（0 = 没有文档，1 = 有一份 1 页的文档）。
+   * 与 toJSON().document.pages 同源。
+   */
+  getTotalPages(): number;
+
+  /**
    * 事件订阅/退订（链式）。全部 15 个事件：
    * ready / change / select / clear / pagechange / zoomchange /
    * stampadd / stampremove / stampchange / stampselect / stampimage /

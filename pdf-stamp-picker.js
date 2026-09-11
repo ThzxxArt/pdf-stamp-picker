@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v4.9.2
+ * PdfStampPicker v4.9.3
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.9.2';
+  var VERSION = '4.9.3';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -392,7 +392,9 @@
     this._pdf = null;
     this._page = null;
     this._pageNumber = 1;
-    this._totalPages = 1;
+    // ★ 未加载文档时总页数为 0（不是 1）："没有文档"与"1 页文档"必须能区分，
+    //   否则 getTotalPages() 在空实例上会谎报 1 页。加载成功后才写入真实页数。
+    this._totalPages = 0;
     this._pdfW = 0; this._pdfH = 0;
     this._offsetX = 0; this._offsetY = 0;
     this._rotation = 0;
@@ -1038,6 +1040,48 @@
   };
 
   /**
+   * 当前文档名（未加载任何文档时为 ''）。
+   * 与 toJSON().document.docName 同源（同一字段），只是省掉构建整份 JSON 的开销。
+   * @returns {string}
+   */
+  PdfStampPicker.prototype.getDocName = function () {
+    return this._docName;
+  };
+
+  /**
+   * 当前文档总页数（**未加载任何文档时为 0**，而不是 1）。
+   * 0 是"没有文档"，1 是"有一份 1 页的文档" —— 调用方靠这个区分，
+   * 因此不要用 `> 0` 之外的花招判断文档是否存在。
+   * @returns {number}
+   */
+  PdfStampPicker.prototype.getTotalPages = function () {
+    return this._totalPages;
+  };
+
+  /**
+   * 文档元信息（唯一来源）。
+   * toJSON() / toFlatJSON() 的 document 块都从这里取：
+   * 历史上两个导出各抄了一份同样的 10 个字段，加字段时漏改一处就会出现
+   * "两种 JSON 出口字段不一致"（本项目的 D7 类文档/实现漂移）。
+   * ★ 新增文档级字段时只改这里 + _resetDocState。
+   */
+  PdfStampPicker.prototype._docMeta = function (includeImage) {
+    return {
+      docName: this._docName,
+      totalPages: this._totalPages,
+      currentPage: this._pageNumber,
+      width: this._pdfW,
+      height: this._pdfH,
+      rotation: this._rotation,
+      offsetX: this._offsetX,
+      offsetY: this._offsetY,
+      hash: this._pdfHash || null,
+      hashStatus: this._hashStatus(),
+      includeImage: !!includeImage
+    };
+  };
+
+  /**
    * 当前哈希状态：'ready' | 'pending' | 'unavailable'
    * 会随 toJSON()/toFlatJSON() 一起输出（document.hashStatus），
    * 用于区分"已算好 / 还在算 / 本场景算不了"，避免只看到 hash 字段消失而无法判断原因。
@@ -1156,7 +1200,7 @@
     // ★ 文档标识也要清：只清画布不清名字，会出现"文件名显示了、页数却是空的"自相矛盾状态
     //   （实测：加载中 abort() 后 toJSON().document.name 仍是未加载完的名字）
     this._docName = '';
-    this._totalPages = 1;
+    this._totalPages = 0;   // 0 = 无文档（与构造时一致，见构造器注释）
     this._loadStage = '';
   };
 
@@ -1576,7 +1620,9 @@
 
   PdfStampPicker.prototype.gotoPage = function (n, loadToken) {
     var self = this;
-    n = clamp(Math.round(n || 1), 1, this._totalPages);
+    // 下界兜底用 Math.max(1, _totalPages)：_totalPages=0 表示"无文档"，
+    // 若直接 clamp(n,1,0) 会得到 0（越界页码）。无文档时紧随其后的分支即返回，不影响行为。
+    n = clamp(Math.round(n || 1), 1, Math.max(1, this._totalPages));
     if (this._pdfMode !== 'pdfjs' || !this._pdf) return Promise.resolve();
     if (n === this._pageNumber && this._page) return Promise.resolve();
     // ★ H1：双重令牌校验
@@ -2114,38 +2160,13 @@
    */
   PdfStampPicker.prototype.toJSON = function (opts) {
     opts = opts || {};
-    var doc = {
-      docName: this._docName,
-      totalPages: this._totalPages,
-      currentPage: this._pageNumber,
-      width: this._pdfW,
-      height: this._pdfH,
-      rotation: this._rotation,
-      offsetX: this._offsetX,
-      offsetY: this._offsetY,
-      hash: this._pdfHash || null,
-      hashStatus: this._hashStatus(),
-      includeImage: !!opts.includeImage
-    };
-    return buildJSON(doc, this._stamps, this._users);
+    return buildJSON(this._docMeta(opts.includeImage), this._stamps, this._users);
   };
 
   /** 扁平版 JSON（旧结构）：stamps 数组每项内嵌 user，按签章点遍历用 */
   PdfStampPicker.prototype.toFlatJSON = function (opts) {
     opts = opts || {};
-    return buildFlatJSON({
-      docName: this._docName,
-      totalPages: this._totalPages,
-      currentPage: this._pageNumber,
-      width: this._pdfW,
-      height: this._pdfH,
-      rotation: this._rotation,
-      offsetX: this._offsetX,
-      offsetY: this._offsetY,
-      hash: this._pdfHash || null,
-      hashStatus: this._hashStatus(),
-      includeImage: !!opts.includeImage
-    }, this._stamps, this._users);
+    return buildFlatJSON(this._docMeta(opts.includeImage), this._stamps, this._users);
   };
 
   /** 获取某用户的全部签章点（PDF 坐标） */

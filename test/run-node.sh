@@ -3,7 +3,7 @@
 #   python3 test/devserver.py 8899   → 打开 http://127.0.0.1:8899/pdf-stamp-picker/demo/run-all.html ）
 cd "$(dirname "$0")/.." || exit 1
 fail=0
-for t in docs json coords history addstamp; do
+for t in docs json coords history addstamp docmeta; do
   if node "test/$t.test.js" > "/tmp/node-$t.log" 2>&1; then
     printf "  OK   %-9s %s\n" "$t" "$(tail -1 "/tmp/node-$t.log" | sed 's/^=== //')"
   else
