@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>addStamp 缺省尺寸语义回归测试（0×0 空章陷阱）</title>
 <link rel="stylesheet" href="../vendor/pdf.min.css">
 <script src="../vendor/pdf.min.js"></script>
@@ -179,7 +180,9 @@
       document.body.appendChild(hv);
       var pv = new PdfStampPicker(hv, { mode: 'stamp', controls: false, stampSize: 120 });
       await pv.load('test.pdf');
-      await sleep(140);                                    // 等布局/缩放稳定
+      /* 等**布局就绪**再点击：库的 _onPointerDown 在 _displayW/_displayH 为 0 时会静默丢弃。
+         以前这里是 sleep(140) —— "猜时间"，负载高时猜不准（正是偶发的来源）。 */
+      await __TEST.waitForLayout(pv);
       apiW.push(pv.addStamp({ x: 50, y: 700 }).width);     // 路径 A：API 缺省（角落，避免与点击落点重叠）
       var ov6 = pv._overlay, r6 = ov6.getBoundingClientRect();
       var cx6 = r6.left + r6.width * 0.5, cy6 = r6.top + r6.height * 0.5;

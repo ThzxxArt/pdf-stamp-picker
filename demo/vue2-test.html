@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vue 2 集成冒烟测试</title>
 <script src="../vendor/vue.min.js"></script>
 <script src="../vendor/pdf.min.js"></script>
@@ -31,6 +32,7 @@ new Vue({
       ],
       mode: 'stamp'
     });
+    window.__picker = this.picker;   // 供自动回归套件取实例
     this.picker.load({ url: 'test.pdf', headers: { 'X-Vue2': '1' } });
     var self = this;
     this.picker.on('stampadd', function () { self.log = 'Vue2 收到 stampadd 事件 ✓'; });
@@ -55,6 +57,17 @@ new Vue({
       });
     }
   }
+});
+</script>
+<script src="test-harness.js?v=4.9.5"></script>
+<script>
+/* 自动回归接入：把"人肉打开页面看日志"换成机器可判定的结果（run-all 套件 ⑬） */
+__TEST.start('Vue2 集成冒烟（自动回归）');
+__TEST.expect(9);
+__TEST.frameworkSmoke({
+  name: 'Vue2', framework: 'Vue 2', logSelector: '#v2log',
+  expectedPages: 3, expectedUsers: 2,
+  vendorOk: function () { return typeof window.Vue === 'function' || typeof window.Vue === 'object'; }
 });
 </script>
 </body>

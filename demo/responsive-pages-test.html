@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>测试页自身窄视口可用性</title>
+<style>
+body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
+#log div{padding:2px 0}
+.ok{color:#4ade80}.bad{color:#f87171}.info{color:#93c5fd}
+/* 放在屏幕外而不是 display:none —— display:none 的 iframe 不参与布局，量不到真实几何 */
+#host{position:absolute;left:-9999px;top:0;width:370px;height:720px;border:0}
+</style>
+</head>
+<body>
+<h2>测试页自身窄视口可用性（套件 ⑰）</h2>
+<p class="info">以 370px 宽（手机竖屏量级）真实加载代表页，每页检查三件事：①实载内容是否横向溢出 ②<b>注入 64 位 hash 长串后容器是否还能断行</b>（带正控）③是否有 viewport meta。</p>
+<p class="info">②为什么要注入：历史缺陷是"日志里打印 64 位 hash → 窄屏被顶破"，但被测页在被量那一刻<b>日志里未必正好有长串</b>，所以"直接量页面当前溢不溢出"实测对 5 个代表页<b>一次都不会红</b>（把 harness 的断行规则整条摘掉也照样全绿 = 假通过）。改成注入真实长串后，同样的变异立刻报红 4 页（117~169px）。</p>
+<p class="info">②的正控：注入后先把探针强制 <code>nowrap</code> 测一次，<b>必须撑破</b>（证明这个探针本来一定会溢），再按页面真实样式测一次要求不撑破。若正控不撑破了，说明断言已失去张力 → 直接判失败，而不是继续显示绿色。</p>
+<p class="info">背景：此前所有测试页都没有 viewport meta，也没有窄屏样式 —— 用手机打开 run-all 或任一测试页时，
+浏览器按 980px 虚拟宽度布局再整体缩略，长 hash 又把日志撑出屏幕。<b>被测库</b>的窄容器自适应做了，
+装它的<b>测试页自己</b>却没人管。本套件就是盯这件事的。长文本容器名单取自 <code>__TEST.LONG_TEXT_SEL</code>（与 harness 注入的样式规则同源），不另抄一份。</p>
+<div id="log"></div>
+
+<script src="test-harness.js?v=4.9.5"></script>
+<script>
+(function () {
+  /* 代表页挑选理由：主展示页（最常被手机打开）、表格/日志最密集的两页、被测库窄容器页本身（自反性）、
+     以及纯换算页（DOM 最少，作为"下限"参照）。刻意**不含 run-all.html** —— 那会递归启动整套回归。 */
+  var PAGES = [
+    'index.html',
+    'docmeta-test.html',
+    'history-nudge-test.html',
+    'narrow-layout-test.html',
+    'coords-vs-pdfjs-test.html'
+  ];
+  var WIDTH = 370;   // 手机竖屏量级（iPhone SE 375 - 滚动条余量）
+
+  __TEST.start('测试页自身窄视口可用性（无横向溢出）');
+  __TEST.expect(PAGES.length * 3 + 1);
+
+  var ifr = document.createElement('iframe');
+  ifr.id = 'host';
+  ifr.setAttribute('scrolling', 'no');
+  document.body.appendChild(ifr);
+
+  function measure(url) {
+    return new Promise(function (resolve) {
+      ifr.src = url;
+      var t0 = Date.now();
+      (function poll() {
+        var d = null;
+        try { d = ifr.contentDocument; } catch (e) { d = null; }
+        if (d && d.readyState === 'complete') {
+          // 等首帧渲染 + harness 注入的样式生效（它挂在 DOMContentLoaded 之后）
+          if (Date.now() - t0 < 1200) return setTimeout(poll, 120);
+          var de = d.documentElement;
+          var meta = d.querySelector('meta[name="viewport"]');
+          resolve({
+            w: de.clientWidth,
+            sw: de.scrollWidth,
+            overflow: de.scrollWidth - de.clientWidth,
+            vp: meta ? (meta.getAttribute('content') || '') : '',
+            probe: probeLongToken(d)
+          });
+          return;
+        }
+        if (Date.now() - t0 > 25000) return resolve({ error: '加载超时（25s）' });
+        setTimeout(poll, 150);
+      })();
+    });
+  }
+
+  /* ---------- 长串探针（本套件最值钱的一条） ----------
+   * 历史缺陷的真实形态：日志里打印 64 位 hash / 长路径，这种**无空格长串**默认不断行，
+   * 把内容顶出屏幕。但"直接量页面当前溢不溢出"**测不到它** —— 被量的那一刻页面日志里
+   * 未必正好有长串（取决于加载快慢），实测 5 个代表页全是 0px 溢出。
+   * 用变异测试证实过：把 harness 的 overflow-wrap 规则摘掉，不注入长串时**照样 5 页全绿（假通过）**。
+   *
+   * 所以改成"把真实形态的长串注入页面的长文本容器再量"，并且带正控：
+   *   ① 断行生效 → 元素自身 scrollWidth == clientWidth（没内容被顶出去）
+   *   ② 把探针自身改成 nowrap（强制不可断行）→ 必须 scrollWidth > clientWidth
+   * ② 是**张力自检**：证明这个探针本来一定会撑破，① 才不是空集上的真命题。
+   * 若哪天 ② 不成立了（探针被改短、宿主宽度被改得比探针还宽…），说明断言已失去张力，
+   * 直接判失败，而不是继续显示绿色。
+   *
+   * 为什么量**元素自身**而不是 documentElement：有的容器自己 `overflow:auto`（如主展示页的
+   * #output），内容溢出会变成容器内滚动条，页面级几何看不见 —— 那正是"看起来没坏"的假象。
+   * 元素级测量对两种情况一视同仁。
+   * 宿主名单来自 `__TEST.LONG_TEXT_SEL`（与 harness 注入的样式规则**同源**）——
+   * 不自己另抄一份，否则"要保护哪些容器"和"探针插到哪里"会各自漂移。
+   */
+  var PROBE_HEX = 'fa4f75211d968a4b3c5e1f2a9d0c7b6e8f4a2c1d3e5b7a9c0f1e2d3c4b5a69788';
+  var PROBE_TEXT = 'document.hash = ' + PROBE_HEX +
+    ' / path=/var/minis/workspace/pdf-stamp-picker/demo/test.pdf';
+  function probeLongToken(d) {
+    var sel = __TEST.LONG_TEXT_SEL;
+    if (!sel) return { sel: '(缺失)' };                 // 名单没了 → 由调用方判失败，不静默退化
+    var host = d.querySelector(sel) || d.body;
+    var el = d.createElement('div');
+    el.textContent = PROBE_TEXT;
+    host.appendChild(el);
+    function gap() { return el.scrollWidth - el.clientWidth; }
+    var box = el.clientWidth;                           // ★ 必须在移除前读：脱离 DOM 后 clientWidth = 0
+    var wrapped = gap();                                // ① 交给页面 + harness 样式去断行
+    el.style.overflowWrap = 'normal';
+    el.style.wordBreak = 'normal';
+    el.style.whiteSpace = 'nowrap';                     // ② 正控：强制不可断行，必须撑破
+    var control = gap();
+    host.removeChild(el);
+    return {
+      host: (host.tagName || '?') + (host.id ? '#' + host.id : ''),
+      len: PROBE_TEXT.length, box: box,
+      wrapped: wrapped, control: control
+    };
+  }
+
+  var chain = Promise.resolve();
+  PAGES.forEach(function (p) {
+    chain = chain.then(function () { return measure(p); }).then(function (m) {
+      if (m.error) {
+        __TEST.record('窄视口（' + WIDTH + 'px）无横向溢出：' + p, false, m.error);
+        __TEST.record('窄视口（' + WIDTH + 'px）注入 64 位 hash 长串后仍不溢出：' + p, false, '页面未加载');
+        __TEST.record('窄视口 viewport meta：' + p, false, '页面未加载');
+        return;
+      }
+      __TEST.record('窄视口（' + WIDTH + 'px）无横向溢出：' + p, m.overflow <= 2,
+        '可视 ' + m.w + 'px / 内容 ' + m.sw + 'px（溢出 ' + m.overflow + 'px）');
+      var pr = m.probe || {};
+      /* 一条断言管两件事：断行生效（wrapped≈0） + 探针确有张力（control>0） */
+      var probeOk = !!__TEST.LONG_TEXT_SEL && pr.wrapped <= 1 && pr.control > 2;
+      __TEST.record('窄视口（' + WIDTH + 'px）注入 64 位 hash 长串后仍不断行：' + p, probeOk,
+        '宿主 ' + pr.host + '（容器宽 ' + pr.box + 'px）/ 探针 ' + pr.len + ' 字符；' +
+        '实际断行 ' + pr.wrapped + 'px（须 ≈0），正控强制 nowrap = ' + pr.control + 'px（须 >0 才算有张力）' +
+        (probeOk ? '' : ' ← ' + (!__TEST.LONG_TEXT_SEL ? 'harness 未导出 LONG_TEXT_SEL' :
+          (pr.control <= 2 ? '正控没撑破：断言已失去张力' : '长串没被断行、顶出容器'))));
+      __TEST.record('窄视口 viewport meta：' + p,
+        !!m.vp && /width\s*=\s*device-width/i.test(m.vp), m.vp || '缺失');
+    });
+  });
+
+  chain.then(function () {
+    /* 自检：PAGES 被清空/改短时，上面所有断言会一起消失，
+       而"没有失败"看起来跟"全都通过"一模一样 —— 这类退化只能靠自检拦住。 */
+    __TEST.record('自检：覆盖 ≥5 个代表页', PAGES.length >= 5, PAGES.length + ' 页');
+    __TEST.finish();
+  }).catch(function (e) {
+    __TEST.record('套件未抛错 —— ' + e.message, false, e.stack || '');
+    __TEST.fail(e);
+  });
+})();
+</script>
+</body>
+</html>

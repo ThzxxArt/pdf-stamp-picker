@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PdfStampPicker 全量浏览器回归（聚合器）</title>
 <style>
 body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
@@ -48,8 +49,19 @@ var SUITE = [
   ['history-nudge-test.html',    '⑧ 撤销历史粒度（一次交互 = 一步 / 不冲爆栈）',   '',               60000],
   ['addstamp-size-test.html',    '⑨ addStamp 缺省尺寸语义（0×0 空章陷阱 + 真实像素）', '',           45000],
   ['docmeta-test.html',          '⑩ 文档元信息 getter（未加载归 0/空串 · 取消/失败/换档归零 · 三出口同源）', '', 45000],
-  ['narrow-layout-test.html',    '⑪ 窄容器布局（按容器宽度堆叠 · 画布不被侧栏挤瘪 · 可逆）', '',      45000]
+  ['narrow-layout-test.html',    '⑪ 窄容器布局（按容器宽度堆叠 · 画布不被侧栏挤瘪 · 可逆）', '',      45000],
+  ['index.html',                 '⑫ 主展示页（容器/纯画布/弹窗三模式 · 真实点击放章 · 切换可逆）', '',  120000],
+  ['vue2-test.html',             '⑬ Vue2 集成（实例 · 加载 · hash · 确认按钮桥接）',      '',         60000],
+  ['vue3-test.html',             '⑭ Vue3 集成（Composition API）',                       '',         60000],
+  ['react-test.html',            '⑮ React 18 集成（函数组件 + useEffect 清理）',          '',         60000],
+  ['angularjs-test.html',        '⑯ AngularJS 1.8 集成（指令模式）',                      '',         60000],
+  ['responsive-pages-test.html', '⑰ 测试页自身窄视口可用性（无横向溢出 · 关键内容可见）',   '',         60000]
 ];
+
+/* 跑完全部套件后再做的**跨套件对账**条数（见文件末尾 aggregate 段）。
+   常量单独声明，是为了让 test/docs.test.js 能算出总条数并与 README 对账 —— 否则
+   "总条数"就成了只能靠人记得同步的魔法数字。 */
+var AGGREGATE_ASSERTIONS = 2;
 
 var frames = document.getElementById('frames');
 var detail = document.getElementById('detail');
@@ -101,7 +113,9 @@ function runOne(entry) {
             label: label, page: page, timedOut: false,
             passed: r.passed, total: r.total, expected: r.expected,
             cases: r.cases, error: r.error,
-            status: r.status, durationMs: Date.now() - t0
+            status: r.status, durationMs: Date.now() - t0,
+            // extras：套件级附加数据（如 document.hash），供跨套件对账
+            extras: r.extras || {}
           });
         }
       }, 250);
@@ -134,19 +148,73 @@ function runOne(entry) {
     if (countMismatch) line('      ✗ 断言条数不符：实际 ' + res.total + '，期望 ' + res.expected + '（有用例漏跑）', 'bad');
   }
 
+  /* ---- 跨套件对账 ----
+     上面每个套件都是独立 iframe、独立加载同一份 demo/test.pdf、各自算出 document.hash。
+     把它们横向摆在一起比：某个框架集成下"文档根本没加载出来 / 算的是别的字节 / 实例串了档"，
+     在这里必然暴露 —— 而这一步过去只能靠人工打开 5 个页面、把 hash 记下来肉眼比对，
+     恰恰是整套回归里最不可靠的一环。
+     条数由常量 AGGREGATE_ASSERTIONS 声明（文件头），供 test/docs.test.js 计算总条数。 */
+  var aggCases = [];
+  var hashSuites = all.filter(function (r) { return r.extras && r.extras.docHash; });
+  var pageSuites = all.filter(function (r) { return r.extras && r.extras.totalPages; });
+  if (hashSuites.length >= 2) {
+    var h0 = hashSuites[0].extras.docHash;
+    var badH = hashSuites.filter(function (r) { return r.extras.docHash !== h0; });
+    aggCases.push({
+      name: 'document.hash 一致（' + hashSuites.length + ' 个入口独立算出）',
+      pass: badH.length === 0,
+      detail: badH.length
+        ? badH.map(function (r) { return r.page + ' → ' + String(r.extras.docHash).slice(0, 12); }).join(' , ') +
+          ' 与 ' + hashSuites[0].page + ' → ' + String(h0).slice(0, 12) + ' 不一致'
+        : h0.slice(0, 16) + '…'
+    });
+  } else {
+    /* 只数到 0/1 个必是上报链路断了（例如页面没暴露实例、或 harness 未接入）——
+       这里判失败而不是跳过，否则"大家都忘了上报"会伪装成"对账通过"。 */
+    aggCases.push({ name: 'document.hash 一致', pass: false,
+      detail: '只有 ' + hashSuites.length + ' 个套件上报了 hash（应 ≥2）—— 上报链路断了' });
+  }
+  if (pageSuites.length >= 2) {
+    var p0 = pageSuites[0].extras.totalPages;
+    var badP = pageSuites.filter(function (r) { return r.extras.totalPages !== p0; });
+    aggCases.push({
+      name: '文档页数一致（' + pageSuites.length + ' 个入口独立读出）',
+      pass: badP.length === 0,
+      detail: badP.length
+        ? badP.map(function (r) { return r.page + ' → ' + r.extras.totalPages + ' 页'; }).join(' , ') + ' ≠ ' + p0 + ' 页'
+        : p0 + ' 页'
+    });
+  } else {
+    aggCases.push({ name: '文档页数一致', pass: false,
+      detail: '只有 ' + pageSuites.length + ' 个套件上报（应 ≥2）' });
+  }
+  if (aggCases.length !== AGGREGATE_ASSERTIONS) {
+    aggCases.push({ name: '对账条数与常量一致', pass: false,
+      detail: '实际 ' + aggCases.length + ' 条 vs AGGREGATE_ASSERTIONS=' + AGGREGATE_ASSERTIONS });
+  }
+  aggCases.forEach(function (c) {
+    line((c.pass ? '✅ ' : '❌ ') + '⑱ 跨套件对账 — ' + c.name + ' · ' + c.detail, c.pass ? 'ok' : 'bad');
+  });
+
   var failedSuites = all.filter(function (r) {
     return r.timedOut || r.error || r.cases.some(function (c) { return !c.pass; }) ||
       ((r.expected != null) && (r.total !== r.expected));
   });
-  var totalCases = all.reduce(function (a, r) { return a + r.total; }, 0);
-  var passCases = all.reduce(function (a, r) { return a + r.passed; }, 0);
-  var okAll = failedSuites.length === 0;
+  var aggFailed = aggCases.filter(function (c) { return !c.pass; });
+  var totalCases = all.reduce(function (a, r) { return a + r.total; }, 0) + aggCases.length;
+  var passCases = all.reduce(function (a, r) { return a + r.passed; }, 0) +
+    (aggCases.length - aggFailed.length);
+  var okAll = failedSuites.length === 0 && aggFailed.length === 0;
 
   sumEl.className = okAll ? 'pass' : 'fail';
   sumEl.textContent = (okAll ? '✅ 全量回归通过：' : '❌ 全量回归失败：') +
     all.length + ' 个套件 · ' + passCases + '/' + totalCases + ' 条断言 · ' +
     ((Date.now() - t0) / 1000).toFixed(1) + 's' +
-    (okAll ? '' : ' · 失败套件 ' + failedSuites.length + ' 个');
+    /* 失败来源要分开报：跨套件对账不属于任何单个套件（aggFailed 时 failedSuites 可能是 0），
+       只写"失败套件 0 个"会读成"其实没失败"——这正是变异测试里一眼看到的歧义。 */
+    (okAll ? '' :
+      ' · 失败套件 ' + failedSuites.length + ' 个' +
+      (aggFailed.length ? ' · 跨套件对账失败 ' + aggFailed.length + ' 条' : ''));
 
   window.__RESULT__ = {
     status: okAll ? 'done' : 'error',
@@ -161,6 +229,8 @@ function runOne(entry) {
     }),
     totalSuites: all.length,
     failedSuites: failedSuites.length,
+    aggregate: aggCases,
+    aggregateFailed: aggFailed.length,
     totalCases: totalCases,
     passedCases: passCases,
     durationMs: Date.now() - t0

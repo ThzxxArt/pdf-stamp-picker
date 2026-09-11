@@ -2,6 +2,7 @@
 <html ng-app="pspDemo">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AngularJS 集成冒烟测试</title>
 <script src="../vendor/angular.min.js"></script>
 <script src="../vendor/pdf.min.js"></script>
@@ -29,6 +30,7 @@ angular.module('pspDemo', []).directive('pdfStampPicker', function () {
       });
       // 把实例挂到 $rootScope（指令与控制器都能访问，可靠无时序坑）
       scope.$root.picker = picker;
+      window.__picker = picker;   // 供自动回归套件取实例
       // 用流接口方式加载(带自定义头 → 算哈希)
       picker.load({ url: 'test.pdf', headers: { 'X-Angular': '1' } });
       scope.$on('$destroy', function () { picker.destroy(); });
@@ -65,6 +67,17 @@ angular.module('pspDemo', []).directive('pdfStampPicker', function () {
     });
   };
 }]);
+</script>
+<script src="test-harness.js?v=4.9.5"></script>
+<script>
+/* 自动回归接入：把"人肉打开页面看日志"换成机器可判定的结果（run-all 套件 ⑯） */
+__TEST.start('AngularJS 集成冒烟（自动回归）');
+__TEST.expect(9);
+__TEST.frameworkSmoke({
+  name: 'AngularJS', framework: 'AngularJS', logSelector: '#log',
+  expectedPages: 3, expectedUsers: 2,
+  vendorOk: function () { return typeof window.angular === 'object' && !!window.angular.version; }
+});
 </script>
 </body>
 </html>

@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>旋转页坐标端到端（真实 load 路径 vs pdf.js）</title>
 <style>
   body { font: 13px/1.7 ui-monospace, Menlo, Consolas, monospace; background: #14161a; color: #d7dae0; margin: 0; padding: 16px; }
@@ -55,6 +56,9 @@ var CASES = [
       record(c.label + ' · 能加载', false, e.message);
       continue;
     }
+    /* 后面第 ⑥ 组要派发真实 pointerdown/up：库的 _onPointerDown 在 _displayW/_displayH 为 0 时
+       **静默丢弃**，会伪装成"库的点击/选区功能坏了"。所有派发指针事件的套件都统一先过这道门禁。 */
+    await __TEST.waitForLayout(p);
     // 库内部的页面/旋转/几何
     var page = await p._pdf.getPage(p._pageNumber);
     var v = page.view, W = v[2] - v[0], H = v[3] - v[1];

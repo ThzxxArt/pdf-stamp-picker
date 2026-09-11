@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vue 3 集成冒烟测试</title>
 <script src="../vendor/vue.global.prod.js"></script>
 <script src="../vendor/pdf.min.js"></script>
@@ -36,6 +37,7 @@ createApp({
         ],
         mode: 'stamp'
       });
+      window.__picker = picker;   // 供自动回归套件取实例
       picker.load({ url: 'test.pdf', headers: { 'X-Vue3': '1' } });
       picker.on('stampadd', () => { log.value = 'Vue3 收到 stampadd 事件 ✓'; });
     });
@@ -63,6 +65,17 @@ createApp({
     return { stageEl, log, confirm, openModal };
   }
 }).mount('#app');
+</script>
+<script src="test-harness.js?v=4.9.5"></script>
+<script>
+/* 自动回归接入：把"人肉打开页面看日志"换成机器可判定的结果（run-all 套件 ⑭） */
+__TEST.start('Vue3 集成冒烟（自动回归）');
+__TEST.expect(9);
+__TEST.frameworkSmoke({
+  name: 'Vue3', framework: 'Vue 3', logSelector: '#vlog',
+  expectedPages: 3, expectedUsers: 2,
+  vendorOk: function () { return typeof window.Vue === 'object' && !!window.Vue.createApp; }
+});
 </script>
 </body>
 </html>

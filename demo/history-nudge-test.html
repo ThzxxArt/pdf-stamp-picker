@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>历史分组（交互级合并）回归测试 …</title>
 <link rel="stylesheet" href="../vendor/pdf.min.css">
 <script src="../vendor/pdf.min.js"></script>
@@ -188,6 +189,10 @@
     /* ---------- 7. 真实拖拽一整段 = 一步历史 ---------- */
     {
       var g = await mkLoaded({});
+      /* 拖拽是"真实指针事件"，同样必须先等布局就绪：库的 _onPointerDown 在
+         _displayW/_displayH 为 0 时**静默丢弃**（不报错、不留痕），下面的
+         pdfToScreen / getBoundingClientRect 也会拿到未布局的错值。 */
+      await __TEST.waitForLayout(g.p);
       await selectAndSettle(g.p, g.stamp.id);
       var k0 = g.p._history.length;
       var st0 = g.p.getStamps()[0];

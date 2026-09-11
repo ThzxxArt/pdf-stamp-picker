@@ -7,8 +7,9 @@
  *   写 14 个事件实际 15 个、d.ts 缺新增选项/方法）。手工核对必然再次漂移，
  *   因此把"文档 vs 实现"变成可自动执行的断言。
  *
- * 检查项（与代码里的 section() 一一对应，共 7 节）：
- *   1. 版本号一致：库内 VERSION / package.json / 模块导出 / 全部 demo 页缓存戳 / 页面上"显示给人看"的版本号
+ * 检查项（与代码里的 section() 一一对应，共 8 节）：
+ *   1. 版本号一致：库内 VERSION / package.json / 模块导出 / 全部 demo 页缓存戳
+ *      （库与 test-harness.js **两处**都必须带 ?v= 且等于当前版本）/ 页面上"显示给人看"的版本号
  *   2. 构造选项：源码 defaults 键 ∪ {pdfjs} == README 声明数 == README 表格项 == d.ts 声明项
  *   3. 事件：源码实际 emit 的名字 == README 声明数 == README 表格项
  *   4. 公开方法：源码 prototype 上的公开方法 ⊆ d.ts 声明
@@ -16,7 +17,8 @@
  *   6. INTEGRATION.md：第 12 章 API 参考 == 源码实际公开成员 ⨯ 事件（双向），
  *      且文内「当前版本」与 version 示例必须等于库版本
  *   7. README 测试段：表格页集合 == run-all 的 SUITE，各页条数 == 该页 __TEST.expect()，
- *      套件数/总条数 == 实际值
+ *      套件数/总条数 == 实际值（总条数含 run-all 的 AGGREGATE_ASSERTIONS）
+ *   8. 测试页自身响应式：全部 demo 页都有 viewport meta；harness 的窄视口样式限定在媒体查询内
  *
  * ★ 两侧数据必须**来源不同**：一边读源码（grep prototype/emit），一边解析 Markdown 表格。
  *   若两边都从库内部读数（如断言 f() === f()）则永不可能失败 —— 等于没测。
@@ -67,6 +69,33 @@ demoFiles.forEach(f => {
 });
 check('demo 页缓存戳全部等于当前版本', staleStamps.length === 0,
   staleStamps.length ? '过期：' + staleStamps.join(', ') : demoFiles.length + ' 个页面已检查');
+
+/* test-harness.js 也要缓存戳 —— 这是同一类坑的第二处，此前**完全没人查**。
+   为什么它同样致命：harness 决定"断言记没记上、finish 没 finish"，改了 harness 却让浏览器
+   用旧文件，结果不是报错而是**回到旧行为**（例如新增的 frameworkSmoke/waitFor 不存在 →
+   新接入的框架页静默失效，页面仍显示旧结论）。本次实测：10 页带 `?v=`、
+   6 页（index + 4 框架页 + responsive）没带 —— 正是"加了套件忘同步"的具体形态。
+   因此这里两头都查：①带戳的必须等于当前版本 ②引用了 harness 的页**必须带戳**。 */
+const harnessStale = [], harnessNoStamp = [];
+let harnessPages = 0;
+demoFiles.forEach(f => {
+  const body = fs.readFileSync(path.join(ROOT, 'demo', f), 'utf8');
+  const re = /<script\s+src="(test-harness\.js)(\?v=([\w.\-]+))?"/g;
+  let mm;
+  while ((mm = re.exec(body)) !== null) {
+    harnessPages++;
+    if (!mm[2]) harnessNoStamp.push(f);
+    else if (mm[3] !== srcVersion) harnessStale.push(f + ' → ' + mm[3]);
+  }
+});
+/* 自检：页面引用方式若被改动（改用变量拼 URL、或加 CDN 前缀），上面的正则会一处都匹配不到，
+   "全部合格"就成了空集上的真命题 —— 必须先断言真的扫到了足够多的页面。 */
+check('扫描到足够多的 test-harness.js 引用（解析自检 ≥15 处）', harnessPages >= 15,
+  harnessPages + ' 处引用');
+check('test-harness.js 缓存戳全部等于当前版本', harnessStale.length === 0,
+  harnessStale.length ? '过期：' + harnessStale.join(', ') : harnessPages + ' 处已检查');
+check('引用 harness 的页面都带 ?v= 缓存戳（不带 = 会吃到旧 harness）', harnessNoStamp.length === 0,
+  harnessNoStamp.length ? '缺戳：' + harnessNoStamp.join(', ') : '无缺漏');
 
 /* 缓存戳只管"浏览器会不会加载新库"，**管不到页面上直接写给人看的版本号**。
    实测踩到：demo/index.html 的 <title> 与页头 `#ver-tag` 一直写着 v4.9.4（且不是 JS 动态更新的），
@@ -338,7 +367,39 @@ const uniqueSuite = [...new Set(suiteFiles)];
 check('从 run-all.html 解析出套件清单（自检 ≥10 项）', suiteFiles.length >= 10,
   suiteFiles.length + ' 个条目 / ' + uniqueSuite.length + ' 个页面');
 
-/* 各页声明条数：优先字面量；少数页用 `CASES.length * 8` 表达式（解析不了就判失败，不静默跳过） */
+/* 页面内的「（run-all 套件 ⑫）」注释必须与它在 SUITE 里的实际次序一致。
+   本次实测：新增 5 个套件后，index 写 ⑯（实为 ⑫）、vue2 写 ⑫、vue3 写 ⑬、react 写 ⑭、angularjs 写 ⑮
+   —— 5 个里错了 4 个。原因是**插入新套件会让后面所有编号整体错位**，而注释没有任何机器约束。
+   注意 edge90 在 SUITE 里占两个条目（③④），这种一页多套件的页不参与比对（取到的次序不唯一）。 */
+const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+const suiteSeq = {};          // 页面 → 次序符号（一页多条目的记为 null，不参与比对）
+if (suiteBlock) {
+  const le = /\[\s*'([^']+\.html)'\s*,\s*'([^']*)'/g;
+  let lm;
+  while ((lm = le.exec(suiteBlock[1])) !== null) {
+    const cm = new RegExp('[' + CIRCLED + ']').exec(lm[2]);
+    if (!cm) continue;
+    suiteSeq[lm[1]] = (lm[1] in suiteSeq) ? null : cm[0];
+  }
+}
+const numPages = [], numMismatch = [];
+demoFiles.forEach(f => {
+  if (!(f in suiteSeq)) return;
+  const body = fs.readFileSync(path.join(ROOT, 'demo', f), 'utf8');
+  const nm = /（(?:run-all )?套件 ([①-⑳])）/.exec(body);
+  if (!nm) return;
+  numPages.push(f);
+  if (suiteSeq[f] === null) return;                       // 一页多套件：不比对
+  if (suiteSeq[f] !== nm[1]) numMismatch.push(f + ' 注释 ' + nm[1] + ' vs 实际 ' + suiteSeq[f]);
+});
+check('页面内"套件 ⑫"注释与实际次序一致（自检 ≥5 页）',
+  numPages.length >= 5 && numMismatch.length === 0,
+  numMismatch.length ? numMismatch.join('；') : numPages.length + ' 页已核对');
+
+/* 各页声明条数：优先字面量；少数页用 `CASES.length * 8` / `PAGES.length * 2 + 1` 这类表达式。
+   ★ 解析不了就返回 null（调用方判失败），**绝不静默跳过** —— 否则"预期条数"这一侧
+   一旦解析退化，"两边一致"就永远成立。数组元素用受限求值（只求值仓库内自己的数组字面量），
+   这样字符串数组（如 PAGES）与对象数组（如 CASES）都能正确计数。 */
 const demoPageExpect = {};
 function pageExpect(file) {
   const body = fs.readFileSync(path.join(ROOT, 'demo', file), 'utf8');
@@ -346,20 +407,29 @@ function pageExpect(file) {
   if (!m) return null;
   const expr = m[1].replace(/\/\/.*$/, '').trim();
   if (/^\d+$/.test(expr)) return Number(expr);
-  const am = /^([A-Za-z_$][\w$]*)\.length\s*\*\s*(\d+)$/.exec(expr);
-  if (am) {
-    const arr = new RegExp('var\\s+' + am[1] + '\\s*=\\s*\\[([\\s\\S]*?)\\n\\s*\\];').exec(body);
-    if (!arr) return null;
-    const n = (arr[1].match(/\{\s*\w+\s*:/g) || []).length;
-    return n > 0 ? n * Number(am[2]) : null;
-  }
-  return null;
+  const am = /^([A-Za-z_$][\w$]*)\.length\s*\*\s*(\d+)(?:\s*\+\s*(\d+))?$/.exec(expr);
+  if (!am) return null;
+  const name = am[1], mul = Number(am[2]), add = am[3] ? Number(am[3]) : 0;
+  const arrSrc = new RegExp('var\\s+' + name + '\\s*=\\s*\\[([\\s\\S]*?)\\n\\s*\\];').exec(body);
+  if (!arrSrc) return null;
+  let arrLen = 0;
+  try {
+    /* ★ 这里必须是**真换行** '\n'，不能写成 '\\n' —— 后者在源码层面是"反斜杠 + n"两个字符，
+       拼进函数体后 `return [ ... \n];` 里那个反斜杠会让整段成为语法错误，
+       于是**所有表达式型条数解析一律返回 null**。本次就是这样：rot（`CASES.length * 8`）
+       与 responsive（`PAGES.length * 2 + 1`）两页被判"解析不了"。
+       教训：写"拼接出源码再求值"的代码，改完必须**真的跑一次**看它是否成功求值；
+       在别处手敲一份"看起来一样"的版本复现通过，恰恰会掩盖这种转义级差异。 */
+    arrLen = new Function('return [' + arrSrc[1] + '\n];')().length;
+  } catch (e) { return null; }
+  return arrLen > 0 ? arrLen * mul + add : null;
 }
 uniqueSuite.forEach(f => { demoPageExpect[f] = pageExpect(f); });
 const unresolved = uniqueSuite.filter(f => demoPageExpect[f] == null);
 check('每个套件页的期望条数都能解析（无静默跳过）', unresolved.length === 0, unresolved.join(', '));
 
-/* README 测试段的表格行（框架集成页写在不带 `|` 的正文里，不参与对账） */
+/* README 测试段的表格行（框架集成页现已进表格、同样参与对账；
+   行内条数取**第一个** `N 条`，所以描述里不要出现更早的"…条"字样） */
 const readmeTest = sliceSection(README, '## Demo 与测试');
 const readmeRows = readmeTest.split('\n')
   .map(l => /^\|\s*`([^`]+\.html)`\s*\|(.*)\|?\s*$/.exec(l))
@@ -380,7 +450,14 @@ readmeRows.forEach(r => {
 });
 check('README 每页条数 == 该页 __TEST.expect()', countMismatch.length === 0, countMismatch.join('；'));
 
-const totalExpect = suiteFiles.reduce((a, f) => a + (demoPageExpect[f] || 0), 0);
+/* run-all 在跑完所有套件后还会做跨套件对账（hash/页数一致），条数由常量声明 ——
+   解析它才能算出"总条数"，否则 README 里的总数就成了只能靠人记得同步的魔法数字。 */
+const aggConst = /var AGGREGATE_ASSERTIONS = (\d+);/.exec(runAll);
+const aggAssertions = aggConst ? Number(aggConst[1]) : null;
+check('从 run-all 解析出 AGGREGATE_ASSERTIONS（自检）',
+  aggAssertions != null && aggAssertions >= 1, String(aggAssertions));
+
+const totalExpect = suiteFiles.reduce((a, f) => a + (demoPageExpect[f] || 0), 0) + (aggAssertions || 0);
 const suiteCountDoc = /共\s*(\d+)\s*个套件/.exec(readmeTest);
 const sampleDoc = /输出\s*`(\d+)\s*个套件\s*·\s*(\d+)\/(\d+)\s*条断言/.exec(readmeTest);
 check('README「共 N 个套件」== run-all 实际条目数',
@@ -392,6 +469,55 @@ check('README 样例输出「N 个套件 · M/M 条断言」== 实际值',
     && Number(sampleDoc[2]) === totalExpect && Number(sampleDoc[3]) === totalExpect,
   sampleDoc ? sampleDoc[1] + ' 套件 · ' + sampleDoc[2] + '/' + sampleDoc[3] + ' 条 vs 实际 '
     + suiteFiles.length + ' 套件 · ' + totalExpect + ' 条' : '未找到');
+
+/* ---------- 8. 测试页自身响应式 ---------- */
+section('8. 测试页自身响应式（窄视口可用性）');
+/* 背景：被测库做了窄容器自适应，装它的测试页却从没人管 —— 16 个页面都没有 viewport meta，
+   手机上按 980px 虚拟宽度整体缩略，长 hash 再把日志撑出屏幕。
+   这里做**静态**检查（真几何由 demo/responsive-pages-test.html 套件在 370px 下实测）。 */
+const allDemoPages = fs.readdirSync(path.join(ROOT, 'demo')).filter(f => f.endsWith('.html')).sort();
+const noVp = allDemoPages.filter(f => {
+  const s = fs.readFileSync(path.join(ROOT, 'demo', f), 'utf8');
+  const m = /<meta\s+name=["']viewport["']\s+content=["']([^"']*)["']/i.exec(s);
+  return !m || !/width=device-width/i.test(m[1]);
+});
+check('全部 demo 页都有 width=device-width 的 viewport meta', noVp.length === 0,
+  noVp.length ? '缺：' + noVp.join(', ') : allDemoPages.length + ' 个页面已检查');
+
+const harness = fs.readFileSync(path.join(ROOT, 'demo', 'test-harness.js'), 'utf8');
+const mqIdx = harness.indexOf('@media (max-width:640px){');
+const padIdx = harness.indexOf('body{padding:8px');
+check('harness 提供窄视口基准样式（一处生效、全部测试页受益）',
+  mqIdx >= 0 && /injectResponsiveBase/.test(harness), 'injectResponsiveBase()');
+/* 反例保护：窄屏样式若被挪出媒体查询，窄屏是好了，但 run-all 用 1000px iframe 驱动各页时
+   会连带改变被测页面的布局/尺寸 —— 那会让所有套件过往的结论都失去可比性。 */
+check('窄视口样式被限制在媒体查询内（不污染 1000px 的回归环境）',
+  mqIdx >= 0 && padIdx > mqIdx, 'body padding 覆盖出现在媒体查询之后');
+
+const harnessUsers = allDemoPages.filter(f =>
+  fs.readFileSync(path.join(ROOT, 'demo', f), 'utf8').includes('test-harness.js'));
+check('测试页通过 harness 继承窄视口样式（自检 ≥15 页）', harnessUsers.length >= 15,
+  harnessUsers.length + ' 个页面引用了 harness');
+
+const respPage = fs.readFileSync(path.join(ROOT, 'demo', 'responsive-pages-test.html'), 'utf8');
+const respListed = (respPage.match(/'[a-z0-9-]+\.html'/g) || []).length;
+check('响应式套件确实列出了代表页（自检 ≥5 页）', respListed >= 5, respListed + ' 页');
+
+/* 派发**真实指针事件**的套件必须过 __TEST.waitForLayout() 门禁。
+   原因：库的 `_onPointerDown` 第一句是 `if (!this._displayW || !this._displayH) return;` ——
+   从"文档加载完"到"布局完成(rAF/ResizeObserver)"之间的点击会被**静默丢弃**（不抛错、不留痕）。
+   代价实测过：index 套件只等 getTotalPages()>0，完整 run-all 里 **4 次挂 1 次**
+   （⑫ 报"点击后签章未进 JSON"超时），而单独重复跑 8/8 全过 —— 典型的"负载相关偶发"。
+   只等文档就绪不足以防住它，靠 sleep 猜时间也不可靠（⑨ 原先就是 sleep(140)）。
+   所以把它固化成机器约束：**新页面只要派发了指针事件，就必须带门禁**。 */
+const pointerPages = allDemoPages.filter(f =>
+  fs.readFileSync(path.join(ROOT, 'demo', f), 'utf8').includes('new PointerEvent'));
+const noGate = pointerPages.filter(f =>
+  !fs.readFileSync(path.join(ROOT, 'demo', f), 'utf8').includes('waitForLayout'));
+check('派发指针事件的套件都过了布局就绪门禁（自检 ≥4 页）',
+  pointerPages.length >= 4 && noGate.length === 0,
+  noGate.length ? '缺门禁：' + noGate.join(', ') : pointerPages.length + ' 页已检查');
+check('harness 导出 waitForLayout 门禁原语', /waitForLayout:\s*function/.test(harness));
 
 /* ---------- 汇总 ---------- */
 console.log('\n=== 文档一致性：' + passed + '/' + (passed + failed) + ' 通过 ===');

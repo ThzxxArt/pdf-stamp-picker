@@ -16,6 +16,10 @@
  */
 (function () {
   var startedAt = Date.now();
+  /* 需要"长串不断行"保护的容器 —— 样式规则与响应式套件的探针共用这一份名单，
+     避免"要包哪些容器"出现两份各自维护的副本（历史上正是这么漂移的）。 */
+  var LONG_TEXT_SEL = '#log,#log div,#detail,#output,#rlog,.log,.result,pre';
+
   var state = {
     page: (location.pathname.split('/').pop() || '').replace(/\.html$/, ''),
     title: document.title,
@@ -28,7 +32,10 @@
     error: null,
     durationMs: 0,
     startedAt: startedAt,
-    done: false
+    done: false,
+    /* 套件附加数据：供 run-all 做**跨套件**对账（如各框架页算出的 document.hash 必须一致）。
+       没有它时跨页一致性只能靠"人肉看过 5 个页面"——正是回归可信度最薄弱的一环。 */
+    extras: {}
   };
   window.__RESULT__ = state;
 
@@ -49,6 +56,8 @@
   }
 
   window.__TEST = {
+    /** 长文本容器名单（与注入的样式规则同源）—— 响应式套件的探针据此选宿主 */
+    LONG_TEXT_SEL: LONG_TEXT_SEL,
     start: function (title) {
       if (title) { state.title = title; document.title = title; }
       updateTitle();
@@ -85,6 +94,128 @@
       state.durationMs = Date.now() - startedAt;
       updateTitle();
       return state;
+    },
+
+    /**
+     * 记录套件级附加数据（run-all 会读它做跨套件对账）。
+     * 例：__TEST.tag('docHash', p.getHash()) —— 所有对同一 PDF 的套件必须得到同一个值。
+     */
+    tag: function (key, value) { state.extras[key] = value; return state; },
+
+    /**
+     * 框架集成冒烟（Vue2 / Vue3 / React / AngularJS 共用同一份断言契约）。
+     *
+     * 为什么收口到 harness：
+     *   这 4 个页面过去**完全不在自动回归内**，只能人肉打开看日志 —— 于是"某个框架下
+     *   PDF 没加载出来 / hash 算出 null / 确认按钮根本没接上"这类问题，
+     *   只要没人手工点开那一个页面就永远发现不了。断言收在一处，4 个页面共享同一契约，
+     *   将来新增框架页也只是多一行调用。
+     *
+     * 前提：页面需把实例暴露为 window.__picker（一行），并把"确认"按钮与日志元素留在页面上。
+     * 断言（9 条）+ 两个 tag（docHash / totalPages）供 run-all 跨套件对账。
+     */
+    frameworkSmoke: function (opts) {
+      var self = this;
+      var N = opts.name || '框架';
+      var t = opts.timeout || 40000;
+      function rec(n, pass, detail) { __TEST.record(N + '：' + n, pass, detail); }
+      function readHash(p) {
+        // ★ 注意：getHash() 返回的是 **Promise**；同步取值只有 toJSON().document.hash
+        var j = p.toJSON();
+        return (j.document && j.document.hash) || '';
+      }
+      function findConfirmButton() {
+        var btns = document.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+          var txt = btns[i].textContent || '';
+          if (txt.indexOf('确认') >= 0 && txt.indexOf('弹窗') < 0) return btns[i];
+        }
+        return null;
+      }
+      var hash1 = '';
+      return this.waitFor(function () { return window.__picker || null; }, t, 'picker 实例未创建')
+        .then(function (p) {
+          rec('库已加载且版本可读',
+            typeof window.PdfStampPicker === 'function' && !!window.PdfStampPicker.version,
+            'v' + ((window.PdfStampPicker && window.PdfStampPicker.version) || '?'));
+          rec(opts.framework + ' 框架已就绪', !opts.vendorOk || !!opts.vendorOk(), opts.framework + ' 全局对象存在');
+          rec('实例是 PdfStampPicker', !!(p && typeof p.toJSON === 'function' && typeof p.destroy === 'function'),
+            p && p.constructor && p.constructor.name);
+          return self.waitFor(function () { return p.getTotalPages() > 0 ? p : null; }, t, 'PDF 未加载完成');
+        })
+        .then(function (p) {
+          rec('PDF 加载完成且页数正确', p.getTotalPages() === opts.expectedPages,
+            '页数 ' + p.getTotalPages() + '（期望 ' + opts.expectedPages + '）');
+          hash1 = readHash(p);
+          rec('document.hash 是 SHA-256', /^[0-9a-f]{64}$/.test(hash1),
+            hash1 ? hash1.slice(0, 16) + '…' : '空');
+          rec('hash 幂等（重复取同一文档不变）', readHash(p) === hash1,
+            hash1.slice(0, 12) + ' vs ' + readHash(p).slice(0, 12));
+          /* API 一致性：getHash() 是 Promise 接口，其 resolve 值必须与 toJSON().document.hash 相同。
+             两个出口对同一文档给出不同指纹 = 集成方按文档写代码会拿到不一致的值。 */
+          return Promise.resolve(p.getHash()).then(function (h) {
+            rec('getHash() Promise 值与 toJSON().document.hash 一致', h === hash1,
+              String(h).slice(0, 12) + ' vs ' + hash1.slice(0, 12));
+            self.tag('docHash', hash1);
+            self.tag('totalPages', p.getTotalPages());
+            /* 真实交互：点**页面自己的**按钮（走框架的事件绑定 → 页面自己的 toJSON 路径），
+               而不是直接调库 —— 只有这样才能覆盖"框架 ↔ 库"的桥接真的接上了。 */
+            var logEl = document.querySelector(opts.logSelector);
+            var btn = findConfirmButton();
+            if (!btn) throw new Error('未找到"确认"按钮（页面结构变了？）');
+            btn.click();
+            return self.waitFor(function () {
+              var txt = (logEl && logEl.textContent) || '';
+              return txt.indexOf(String(opts.expectedUsers)) >= 0 ? txt : null;
+            }, 15000, '点击"确认"后日志未更新（' + opts.logSelector + '）');
+          });
+        })
+        .then(function (txt) {
+          rec('点"确认"→ 框架侧回写成功（users=' + opts.expectedUsers + '）',
+            (txt || '').indexOf(String(opts.expectedUsers)) >= 0, (txt || '').slice(0, 80));
+          rec('框架侧读到的 hash 与 picker 一致',
+            (txt || '').indexOf(hash1.slice(0, 12)) >= 0, '前 12 位 ' + hash1.slice(0, 12));
+          __TEST.finish();
+        })
+        .catch(function (err) {
+          rec('套件未抛错 —— ' + ((err && err.message) || String(err)), false, (err && err.stack) || '');
+          __TEST.fail(err);
+        });
+    },
+
+    /**
+     * 轮询等待条件成立（返回 Promise）。用例挂起是本项目历史上最难发现的失败模式
+     * （页面停在 running，看起来只是"还没跑完"），所以这里强制要超时，
+     * 且超时后 reject 由调用方转成一条**失败断言**，而不是让 promise 永远悬着。
+     */
+    /* 等"画布布局就绪" —— **派发真实指针事件前必须过这一关**。
+       库的 `_onPointerDown` 第一句就是 `if (!this._displayW || !this._displayH) return;`：
+       从"文档加载完"到"布局完成（经 rAF / ResizeObserver）"之间存在一个时间窗，此时点击会被
+       **静默丢弃** —— 不抛错、不留痕，只表现为"点了没反应"。机器越忙窗口越长。
+       实测代价：index 套件**单独**重复跑 8/8 全过（322~414ms），但在完整 run-all 里 4 次挂 1 次
+       （⑫ 报"点击后签章未进 JSON"，8s 超时）—— 只等 `getTotalPages() > 0` 是不够的。
+       为什么不用 `sleep(140)` 之类"猜时间"：负载高时猜不准，正是偶发的来源。 */
+    waitForLayout: function (p, timeoutMs) {
+      return this.waitFor(function () {
+        if (!p) return null;
+        var w = p._displayW | 0, h = p._displayH | 0;
+        var ov = p._overlay, r = (ov && ov.getBoundingClientRect) ? ov.getBoundingClientRect() : null;
+        return (w > 0 && h > 0 && r && r.width > 0 && r.height > 0)
+          ? { w: w, h: h, rectW: Math.round(r.width) } : null;
+      }, timeoutMs || 10000, '画布布局就绪（未布局时库会静默丢弃点击）');
+    },
+    waitFor: function (cond, timeoutMs, label) {
+      var t = timeoutMs || 10000;
+      return new Promise(function (resolve, reject) {
+        var t0 = Date.now();
+        (function tick() {
+          var v;
+          try { v = cond(); } catch (e) { return reject(e); }
+          if (v) return resolve(v);
+          if (Date.now() - t0 > t) return reject(new Error('waitFor 超时（' + t + 'ms）：' + (label || '条件未成立')));
+          setTimeout(tick, 50);
+        })();
+      });
     },
 
     /**
@@ -137,6 +268,42 @@
       return { real: real, wrapper: wrapper, holder: holder };
     }
   };
+
+  /**
+   * 窄视口基准样式（所有测试页共用）。
+   *
+   * 为什么放在 harness 而不是各页 CSS：16 个测试页各自维护样式，逐个加媒体查询
+   * 既容易漏、又会随新页继续欠账；而"用手机打开 run-all/某个测试页时表格横向溢出、
+   * 日志被 nowrap 撑出屏幕"是同一个共性缺陷 —— 收口到一处才不会再漂移。
+   *
+   * 刻意只包在 max-width:640px 里：
+   *   - run-all 用 1000px 宽的同源 iframe 驱动各页 → 媒体查询不触发 → **回归结果零影响**
+   *   - 一旦有页面的像素/尺寸断言依赖 body 内边距，也不会被这个样式悄悄改变结论
+   * 同理不加 iframe 规则：run-all 的 iframe 宽度是被刻意设定的（1000px），压窄会改变被测行为。
+   */
+  function injectResponsiveBase() {
+    if (document.getElementById('__harness-responsive')) return;
+    var st = document.createElement('style');
+    st.id = '__harness-responsive';
+    st.textContent =
+      'html{-webkit-text-size-adjust:100%}' +
+      '@media (max-width:640px){' +
+        'body{padding:8px !important}' +
+        'pre{white-space:pre-wrap !important;word-break:break-word;overflow-wrap:anywhere}' +
+        /* 64 位 hash / 长路径这类**无空格长串**默认不断行，是窄屏横向溢出的主因。
+           ★ 这个名单是"要保护哪些长文本容器"的唯一真源：它同时被
+             ①本样式规则 ②响应式套件的长串探针 消费（__TEST.LONG_TEXT_SEL）。
+           曾经的问题：名单里没有主展示页的 #output（它只靠自己的 word-break 侥幸不溢出），
+           而探针又另抄一份宿主名单 —— 两边一旦不一致，"探针所在容器被保护了没有"就说不清。 */
+        LONG_TEXT_SEL + '{overflow-wrap:anywhere}' +
+        'table{display:block;overflow-x:auto;max-width:100%}' +
+        'th,td{word-break:break-word}' +
+        'h1{font-size:17px}h2{font-size:15px}' +
+      '}';
+    document.head.appendChild(st);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', injectResponsiveBase);
+  else injectResponsiveBase();
 
   // 兜底：未捕获异常 → 记为失败（否则页面静默停在 running，聚合器只能靠超时发现）
   window.addEventListener('error', function (e) {

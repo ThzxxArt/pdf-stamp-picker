@@ -647,7 +647,7 @@ cd pdf-stamp-picker && python3 -m http.server 8899
 
 主 Demo 展示：容器模式（多用户多签章/三种模式/动态签署方/导入 JSON 回显）/ 纯画布模式 / 弹窗模式（确认校验）/ JSON 分组输出（含 document.hash）/ 工具栏配置。
 
-**一键全量浏览器回归**：`demo/run-all.html` 用 iframe 顺序跑下面所有页面（`edge90-sim-test.html` 跑默认与 `?strict=1` 两遍 → 共 11 个套件），输出 `11 个套件 · 190/190 条断言 · 55.4s` 这样的单一结论（任一页失败即汇总为 FAIL）。各页共用 `demo/test-harness.js`：`__TEST.start/expect/record/finish` + `__TEST.summary()`，结果挂在 `window.__RESULT__`；页面脚本抛错会被 harness 记为「未处理的 Promise 拒绝」——所以 `expect()` 的条数必须与 `record()` 实际条数一致，否则会被判成漏跑/多报。
+**一键全量浏览器回归**：`demo/run-all.html` 用 iframe 顺序跑下面所有页面（`edge90-sim-test.html` 跑默认与 `?strict=1` 两遍 → 共 17 个套件），输出 `17 个套件 · 252/252 条断言 · 55s` 这样的单一结论（任一页失败即汇总为 FAIL）。各页共用 `demo/test-harness.js?v=<版本>`：`__TEST.start/expect/record/finish` + `__TEST.summary()`，结果挂在 `window.__RESULT__`；页面脚本抛错会被 harness 记为「未处理的 Promise 拒绝」——所以 `expect()` 的条数必须与 `record()` 实际条数一致，否则会被判成漏跑/多报。跑完所有套件后，聚合器还会做一次**跨套件对账**（2 条，见下）：各页各自独立加载同一份 PDF 算出的 `document.hash` 与页数必须完全一致 —— 过去这一步只能靠人肉打开 5 个页面比对 hash。
 
 > 本节的**套件清单与条数由 `test/docs.test.js` 自动校验**（与 `run-all.html` 的 `SUITE`、各页 `__TEST.expect()` 对账）——避免"加了套件忘了写文档 / 条数写错"这类滞后。
 
@@ -663,8 +663,18 @@ cd pdf-stamp-picker && python3 -m http.server 8899
 | `addstamp-size-test.html` | `addStamp()` 缺省尺寸语义：0×0 空章陷阱、缺省 = `stampSize`（pdf pt）、随比例、选区同步（20 条） |
 | `docmeta-test.html` | 文档元信息：未加载归 0/空串（≠1 页）、取消/失败/换档归零、三出口同源（25 条） |
 | `narrow-layout-test.html` | 窄容器布局：按**容器**宽度堆叠（非视口）、画布不被 248px 列表挤瘪、阈值上下侧、形态可逆（14 条） |
+| `index.html` | **主展示页**（唯一同时覆盖三条主路径的页面）：容器模式加载、真实指针点击 → 落章进 JSON 且面板同步、切「纯画布」→ 实例重建为 1 页、切回容器 → 重新加载 3 页（8 条） |
+| `vue2-test.html` | Vue 2 集成：实例创建、PDF 加载、`document.hash`、`getHash()` 与 JSON 出口一致、点页面自己的「确认」→ 框架侧回写（9 条） |
+| `vue3-test.html` | Vue 3 集成（Composition API）：同一份断言契约（9 条） |
+| `react-test.html` | React 18 集成（函数组件 + `useEffect` 清理）：同一份断言契约（9 条） |
+| `angularjs-test.html` | AngularJS 1.8 集成（指令模式，实例挂 `$rootScope`）：同一份断言契约（9 条） |
+| `responsive-pages-test.html` | **测试页自身的窄视口可用性**：以 370px 真实加载 5 个代表页，检查①实载内容无横向溢出 ②注入 64 位 hash 长串后仍能断行（**带正控**，见下）③viewport meta（16 条） |
 
-框架集成测试页（均已实测运行）：`demo/angularjs-test.html`、`demo/vue2-test.html`、`demo/vue3-test.html`、`demo/react-test.html`。
+跨套件对账（聚合器在所有套件跑完后执行，2 条）：16 个入口各自独立加载 `test.pdf`，`document.hash` 必须全部相同（实测 `fa4f75211d96…`）、页数必须全部为 3 —— 任何一处"文档没加载出来/算的是别的字节/实例串档"都会在这里暴露。上报链路本身也有守卫：上报套件数 < 2 时判**失败**而不是跳过（否则"大家都忘了上报"会伪装成"对账通过"）。
+
+> 框架集成页（Vue 2/3、React、AngularJS）此前**完全在自动回归之外**，只能人肉打开看日志；现由 `__TEST.frameworkSmoke()` 统一收口，4 页共享同一断言契约，新增框架页只需一行调用。
+
+> 窄视口那条断言是**带正控**的：先按真实形态把长串（64 位 hash + 长路径）注入页面的长文本容器，再要求该容器**自己**别被顶破（量元素 `scrollWidth`，`overflow:auto` 的容器同样一视同仁 —— 量页面级几何会被它掩盖），最后把探针强制 `nowrap` 复测一次：**正控必须撑破**，否则说明这条断言已失去张力，直接判失败。为什么要这么绕：原来那种"直接量页面当前溢不溢出"的写法实测对 5 个代表页**一次都不会红** —— 把 harness 的断行规则整条摘掉也照样 5 页全绿（**假通过**）；改成注入长串后，同样的变异立刻报红 4 页（117~169px），而主展示页仍绿（它自己的 `#output` 有 `word-break` 兜底）。
 
 Node 侧（无浏览器，一键：`sh test/run-node.sh`）：
 ```bash

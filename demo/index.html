@@ -285,6 +285,7 @@ function initContainerMode() {
     stampMargin: 12   // 签章距页面边界间距（可改为 0 紧贴）
   });
   bindPicker(picker);
+  window.__picker = picker;   // 供自动回归套件取实例
   // 旧浏览器（Edge 90/Chrome 91/FF 89 等）检测：仅 compatCheck:true 时提前提示升级（库 load 也会拦，这里更早）
   // ★ 默认 false = 自动兼容（polyfill 兜底），不提示；用实例的 _nativeCompat（原生兼容标志）避免 polyfill 污染检测
   if (picker._options.compatCheck === true && picker._nativeCompat) {
@@ -326,6 +327,7 @@ function initCanvasMode() {
 
   picker = new PdfStampPicker(stage, { mode: 'stamp', controls: true, users: USERS, currentUser: 'u2' });
   bindPicker(picker);
+  window.__picker = picker;   // 供自动回归套件取实例
   picker.setPage({ canvas: cv, width: W, height: H, rotation: 0, pageNumber: 1, totalPages: 1, name: 'canvas合同.pdf' });
   picker._ensureStampImage().then(() => {
     renderUsers();
@@ -378,6 +380,89 @@ document.getElementById('tab-modal').addEventListener('click', () => {
 });
 
 initContainerMode();
+</script>
+<script src="test-harness.js?v=4.9.5"></script>
+<script>
+/* 主展示页自动回归（run-all 套件 ⑫）
+   此前这一页**完全在自动回归之外**，只能人肉点开看 —— 而它恰恰是唯一同时覆盖
+   "容器模式 / 纯画布模式 / 弹窗模式"三条主路径的页面，欠账只是被"每轮人工验一遍"掩盖着。 */
+(function () {
+  var N = '主展示页';
+  __TEST.start('主展示页 index.html（自动回归）');
+  __TEST.expect(8);
+  function rec(n, pass, detail) { __TEST.record(N + '：' + n, pass, detail); }
+  var hash1 = '';
+  __TEST.waitFor(function () { return window.__picker || null; }, 40000, '实例未创建')
+    .then(function (p) {
+      rec('库已加载且版本可读',
+        typeof PdfStampPicker === 'function' && !!PdfStampPicker.version, 'v' + PdfStampPicker.version);
+      rec('容器模式已创建实例',
+        typeof p.toJSON === 'function' && typeof p.destroy === 'function', p.constructor.name);
+      return __TEST.waitFor(function () { return p.getTotalPages() > 0 ? p : null; }, 40000, 'PDF 未加载完成');
+    })
+    .then(function (p) {
+      rec('容器模式加载 test.pdf（3 页）', p.getTotalPages() === 3, '页数 ' + p.getTotalPages());
+      hash1 = (p.toJSON().document.hash) || '';
+      rec('document.hash 是 SHA-256', /^[0-9a-f]{64}$/.test(hash1), hash1 ? hash1.slice(0, 16) + '…' : '空');
+      __TEST.tag('docHash', hash1);
+      __TEST.tag('totalPages', p.getTotalPages());
+      return Promise.resolve(p._ensureStampImage ? p._ensureStampImage() : null).then(function () { return p; });
+    })
+    .then(function (p) {
+      /* 真实指针事件（不是直接调 addStamp）：覆盖"点击 → 屏幕坐标→PDF 坐标 → 入 JSON"整条链路。
+         ★ 必须派发到 .psp-overlay（库把 pointerdown/move/up 都绑在这个覆盖层上）；
+           派发到它的父元素 .psp-page 只会向上冒泡，监听器永远收不到 —— 表现为"点了没反应"，
+           很容易被误判成库的点击功能坏了。
+         ★ 派发前必须先等**布局就绪**：库的 _onPointerDown 开头是
+           `if (!this._displayW || !this._displayH) return;`，布局没完成时点击被静默丢弃。
+           这条门禁是补上来的 —— 此前只等 getTotalPages()>0，于是完整 run-all 里
+           **偶发**（4 次挂 1 次）报"点击后签章未进 JSON"，而单独重复跑 8/8 全过。 */
+      return __TEST.waitForLayout(p).then(function () { return p; });
+    })
+    .then(function (p) {
+      var pageEl = document.querySelector('#stage .psp-overlay');
+      if (!pageEl) throw new Error('未找到 .psp-overlay（库的交互层结构变了？）');
+      var r = pageEl.getBoundingClientRect();
+      var cx = r.left + r.width * 0.5, cy = r.top + r.height * 0.5;
+      ['pointerdown', 'pointerup'].forEach(function (t) {
+        pageEl.dispatchEvent(new PointerEvent(t, {
+          clientX: cx, clientY: cy, bubbles: true, cancelable: true,
+          pointerId: 1, isPrimary: true, pointerType: 'mouse',
+          button: 0, buttons: t === 'pointerdown' ? 1 : 0
+        }));
+      });
+      return __TEST.waitFor(function () {
+        var n = p.toJSON().users.reduce(function (a, g) { return a + g.stamps.length; }, 0);
+        if (n <= 0) return null;
+        var out = document.getElementById('output');
+        return { n: n, out: out ? out.textContent : '' };
+      }, 8000, '点击后签章未进 JSON');
+    })
+    .then(function (r) {
+      rec('真实点击画布 → 签章进 JSON', r.n === 1, '签章数 ' + r.n);
+      rec('页面 JSON 面板同步更新（事件桥接生效）',
+        /page|stamp|x/i.test(r.out) && r.out.length > 20, (r.out || '').replace(/\s+/g, ' ').slice(0, 70));
+      document.getElementById('tab-canvas').click();
+      return __TEST.waitFor(function () {
+        var p = window.__picker; return (p && p.getTotalPages() === 1) ? p : null;
+      }, 8000, '切"纯画布"后未就绪');
+    })
+    .then(function (p) {
+      rec('切"纯画布"→ 实例重建且为 1 页', p.getTotalPages() === 1, '页数 ' + p.getTotalPages());
+      document.getElementById('tab-container').click();
+      return __TEST.waitFor(function () {
+        var q = window.__picker; return (q && q !== p && q.getTotalPages() === 3) ? q : null;
+      }, 40000, '切回容器模式未就绪');
+    })
+    .then(function (q) {
+      rec('切回容器模式 → 重新加载 3 页（销毁重建无残留）', q.getTotalPages() === 3, '页数 ' + q.getTotalPages());
+      __TEST.finish();
+    })
+    .catch(function (err) {
+      rec('套件未抛错 —— ' + ((err && err.message) || String(err)), false, (err && err.stack) || '');
+      __TEST.fail(err);
+    });
+})();
 </script>
 </body>
 </html>
