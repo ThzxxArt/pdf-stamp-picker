@@ -85,6 +85,56 @@
       state.durationMs = Date.now() - startedAt;
       updateTitle();
       return state;
+    },
+
+    /**
+     * 给全局对象上的方法安全打桩 —— 绕过 webpack 产物的【只读 getter】。
+     *
+     * 为什么必须有它（真实踩坑，代价很大）：
+     *   pdf.min.js 这类 webpack 打包库用
+     *       Object.defineProperty(exports, 'getDocument', {enumerable:true, get:fn})
+     *   导出，描述符是 {enumerable:true, configurable:false} —— **没有 setter、也不可重定义**。
+     *   于是测试页里最自然的写法 `lib.getDocument = myFn` 在**非严格模式下静默失败**：
+     *   不抛错、控制台干净、`typeof` 看起来也对，但桩一次都不会被调用。
+     *   后果不是"报错"，而是**依赖该桩的用例全部退化成"赌真实耗时"**——
+     *   机器快一点/慢一点结论就翻转，失败信息还指向被测库，排查方向被彻底带偏。
+     *   （本次 h1 的 ⑥ 前提自检正是因此亮红：`__gdLog=[]`，桩从未被调到。）
+     *
+     * 做法：描述符不可写就**克隆宿主**（原样搬运其它属性的描述符，
+     * GlobalWorkerOptions / PDFWorker 等仍共享同一引用），在新对象上定义可写的桩，
+     * 并写回 window[holderKey]；最后**自检**，没装上就当场抛错。
+     *
+     * @param {string} holderKey  全局对象名，如 'pdfjsLib'
+     * @param {string} methodName 方法名，如 'getDocument'
+     * @param {(real:Function, holder:object) => Function} make 生成包装函数
+     * @returns {{real:Function, wrapper:Function, holder:object}}
+     */
+    swapGlobalMethod: function (holderKey, methodName, make) {
+      var src = window[holderKey];
+      if (!src) throw new Error('swapGlobalMethod: window.' + holderKey + ' 不存在');
+      var real = src[methodName];
+      if (typeof real !== 'function') throw new Error('swapGlobalMethod: ' + holderKey + '.' + methodName + ' 不是函数');
+      var wrapper = make(real, src);
+      var desc = Object.getOwnPropertyDescriptor(src, methodName);
+      var holder;
+      if (desc && !desc.get && !desc.set && desc.writable === true && desc.configurable === true) {
+        src[methodName] = wrapper;                       // 普通可写属性：直接赋值
+        holder = src;
+      } else {
+        var clone = Object.create(Object.getPrototypeOf(src));   // 只读 getter/不可写/不可配置 → 克隆宿主
+        Object.getOwnPropertyNames(src).forEach(function (k) {
+          if (k === methodName) return;
+          Object.defineProperty(clone, k, Object.getOwnPropertyDescriptor(src, k));
+        });
+        Object.defineProperty(clone, methodName, { value: wrapper, writable: true, enumerable: true, configurable: true });
+        window[holderKey] = clone;
+        holder = clone;
+      }
+      // ★ 自检：宁可让用例炸在"桩根本没装上"，也不要它在假前提下"看起来通过"
+      if (window[holderKey][methodName] !== wrapper) {
+        throw new Error('swapGlobalMethod: 打桩失败（' + holderKey + '.' + methodName + ' 未被替换）');
+      }
+      return { real: real, wrapper: wrapper, holder: holder };
     }
   };
 

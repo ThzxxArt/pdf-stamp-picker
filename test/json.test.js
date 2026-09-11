@@ -3,7 +3,8 @@ const assert = require('assert');
 const PdfStampPickerModule = require('/var/minis/workspace/pdf-stamp-picker/pdf-stamp-picker.js');
 const { _internals, version } = PdfStampPickerModule;
 
-assert.strictEqual(version, '4.9.1');
+// 版本号不写字面量：以 package.json 为唯一真源（历史上硬编码导致每次发版都要手工同步多处）
+assert.strictEqual(version, require('/var/minis/workspace/pdf-stamp-picker/package.json').version);
 
 const { buildJSON, buildFlatJSON, genId, normalizeRotation } = _internals;
 

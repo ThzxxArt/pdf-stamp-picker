@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>历史分组（交互级合并）回归测试 …</title>
+<link rel="stylesheet" href="../vendor/pdf.min.css">
+<script src="../vendor/pdf.min.js"></script>
+<script src="test-harness.js?v=4.9.2"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.2"></script>
+<style>
+  body { font: 13px/1.6 -apple-system, "PingFang SC", sans-serif; margin: 12px; color: #222; }
+  h1 { font-size: 15px; }
+  #log div { padding: 2px 0; white-space: pre-wrap; }
+  .ok { color: #1a7f37; } .bad { color: #c00; font-weight: 600; }
+  .sec { margin-top: 8px; font-weight: 700; color: #0369a1; }
+  .host { position: fixed; left: -3000px; top: 0; width: 400px; height: 560px; }
+</style>
+</head>
+<body>
+<h1>历史分组（交互级合并）回归测试</h1>
+<div id="log"></div>
+<script>
+(function () {
+  var W = 595, H = 842;
+  var cases = [];
+
+  function say(msg, cls) {
+    var d = document.createElement('div');
+    d.className = cls || '';
+    d.textContent = msg;
+    document.getElementById('log').appendChild(d);
+  }
+  function rec(name, pass, detail) { __TEST.record(name, pass, detail); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function mkHost() {
+    var h = document.createElement('div');
+    h.className = 'host';
+    document.body.appendChild(h);
+    return h;
+  }
+
+  // 真实文档 + 一个签章；返回 {p, host, stamp}
+  async function mkLoaded(opts) {
+    var host = mkHost();
+    var p = new PdfStampPicker(host, opts || {});
+    await p.load('test.pdf');
+    var st = p.addStamp({ x: W / 2, y: H / 2 });
+    // addStamp 的返回值可能是实例而非签章对象（不同版本有过差异）→ 统一从实时状态取，
+    // 否则 stamp.id 为 undefined，selectStamp 静默失败，后续按键断言会"假失败"。
+    if (!st || !st.id) { var all = p.getStamps(); st = all[all.length - 1]; }
+    return { p: p, host: host, stamp: st };
+  }
+
+  /* selectStamp 在跨页场景是异步的（gotoPage().then(go)）：
+   * 必须等 _sel 真正建立后按键才有意义，否则断言会空转通过/失败。 */
+  async function selectAndSettle(p, id) {
+    p.selectStamp(id);
+    await sleep(60);
+  }
+
+  function key(p, type, k, shift) {
+    var ev;
+    try { ev = new KeyboardEvent(type, { key: k, bubbles: true, cancelable: true, shiftKey: !!shift }); }
+    catch (e) { ev = new Event(type, { bubbles: true }); ev.key = k; ev.shiftKey = !!shift; }
+    p._root.dispatchEvent(ev);
+  }
+
+  // 模拟"按住不放"：浏览器按键重复会连发 keydown，抬起时只有一个 keyup
+  function hold(p, k, n, shift) {
+    for (var i = 0; i < n; i++) key(p, 'keydown', k, shift);
+    key(p, 'keyup', k);
+  }
+
+  async function run() {
+    __TEST.start('历史分组（交互级合并）回归测试');
+
+    /* ---------- 1. 不分组时，每次变更 = 独立一步（保持旧语义） ---------- */
+    {
+      var a = await mkLoaded({});
+      var base = a.p._history.length;
+      a.p.addStamp({ x: 100, y: 100 });
+      a.p.addStamp({ x: 200, y: 200 });
+      rec('不分组：两次新增产生两步历史',
+        a.p._history.length === base + 2,
+        'base=' + base + ' now=' + a.p._history.length);
+      // 撤到底（不硬编码步数：断言的是"撤销到底 == 初始空状态"这个真不变量）
+      while (a.p._historyIdx > 0) a.p.undo();
+      rec('不分组：撤销到底回到初始无签章状态',
+        a.p.getStamps().length === 0, '余 ' + a.p.getStamps().length + ' 个');
+      a.p.destroy(); a.host.remove();
+    }
+
+    /* ---------- 2. 真实按键连发确实生效（前提校验，防后续断言空转） ---------- */
+    {
+      var b = await mkLoaded({});
+      await selectAndSettle(b.p, b.stamp.id);
+      var x0 = b.p.getStamps()[0].x;
+      hold(b.p, 'ArrowLeft', 5, false);
+      var x1 = b.p.getStamps()[0].x;
+      rec('真实按键连发确实改变了签章位置',
+        Math.abs(x0 - x1) >= 4,
+        'x: ' + x0 + ' → ' + x1 + '（5 次 1px 微调应至少移动 4px）');
+      b.p.destroy(); b.host.remove();
+    }
+
+    /* ---------- 3. 按住 30 次（≈1 秒按键重复）只产生【一步】历史 ---------- */
+    {
+      var c = await mkLoaded({});
+      await selectAndSettle(c.p, c.stamp.id);
+      var before = c.p._history.length;
+      var x0 = c.p.getStamps()[0].x;
+      hold(c.p, 'ArrowLeft', 30, false);
+      rec('按住连发 30 次只产生 1 条历史',
+        c.p._history.length === before + 1,
+        'before=' + before + ' after=' + c.p._history.length);
+      c.p.undo();
+      rec('按住后撤销一次即回到按之前的位置',
+        c.p.getStamps()[0].x === x0,
+        'x: ' + c.p.getStamps()[0].x + ' 期望 ' + x0);
+      c.p.destroy(); c.host.remove();
+    }
+
+    /* ---------- 4. 两次独立按住 = 两步（分组结束必须封口） ---------- */
+    {
+      var d = await mkLoaded({});
+      await selectAndSettle(d.p, d.stamp.id);
+      var n0 = d.p._history.length;
+      var x0 = d.p.getStamps()[0].x;
+      hold(d.p, 'ArrowLeft', 3, false);
+      var xa = d.p.getStamps()[0].x;
+      hold(d.p, 'ArrowLeft', 3, false);
+      var xb = d.p.getStamps()[0].x;
+      rec('两次独立按住产生两步历史',
+        d.p._history.length === n0 + 2,
+        'n0=' + n0 + ' now=' + d.p._history.length +
+        '（旧实现因合并键未封口会误判为 1 步）');
+      d.p.undo();
+      rec('撤销一次只回退第二次按住',
+        d.p.getStamps()[0].x === xa && xa !== xb,
+        'x: ' + d.p.getStamps()[0].x + ' 期望 ' + xa + '（xa≠xb: ' + (xa !== xb) + '）');
+      d.p.undo();
+      rec('再撤销一次回到最初位置',
+        d.p.getStamps()[0].x === x0, 'x: ' + d.p.getStamps()[0].x + ' 期望 ' + x0);
+      d.p.destroy(); d.host.remove();
+    }
+
+    /* ---------- 5. 长按 200 次不会把撤销栈冲爆（根治目标的量化验证） ---------- */
+    {
+      // 先用 5 步无关操作垫底 —— 旧实现下这些历史会被一次长按挤干净
+      var e = await mkLoaded({ historyLimit: 50 });
+      for (var i = 0; i < 5; i++) e.p.addStamp({ x: 50 + i * 20, y: 50 });
+      await selectAndSettle(e.p, e.p.getStamps()[0].id);
+      var n1 = e.p._history.length;           // 应为 6（初始 + 5 次新增）
+      var xBase = e.p.getStamps()[0].x;
+      hold(e.p, 'ArrowRight', 200, false);    // ≈ 6.6 秒按键重复
+      rec('长按 200 次后历史条数只 +1',
+        e.p._history.length === n1 + 1,
+        'n1=' + n1 + ' now=' + e.p._history.length);
+      rec('长按 200 次后历史未被 historyLimit 截断',
+        e.p._history.length <= 51,
+        'len=' + e.p._history.length + '（旧实现会顶到上限 51 并丢掉初始状态）');
+      e.p.undo();
+      rec('长按 200 次后撤销一次回到长按前',
+        e.p.getStamps()[0].x === xBase, 'x=' + e.p.getStamps()[0].x + ' 期望 ' + xBase);
+      while (e.p._historyIdx > 0) e.p.undo();
+      rec('再撤到底可回到最初的空状态（垫底历史未被冲掉）',
+        e.p.getStamps().length === 0, '余 ' + e.p.getStamps().length + ' 个签章');
+      e.p.destroy(); e.host.remove();
+    }
+
+    /* ---------- 6. 失焦收尾：按住中途切走窗口，下一次按住必须算新的一步 ---------- */
+    {
+      var f = await mkLoaded({});
+      f.p.selectStamp(f.stamp.id);
+      var m0 = f.p._history.length;
+      for (var j = 0; j < 5; j++) key(f.p, 'keydown', 'ArrowUp', false);   // 没有 keyup
+      f.p._root.dispatchEvent(new Event('blur'));                           // 失焦兜底收尾
+      rec('失焦后分组键已清空',
+        f.p._histGroupKey === null, 'groupKey=' + f.p._histGroupKey);
+      hold(f.p, 'ArrowUp', 5, false);
+      rec('失焦收尾后下一次按住是新的一步（不失焦会少一步撤销）',
+        f.p._history.length === m0 + 2,
+        'm0=' + m0 + ' now=' + f.p._history.length + '（期望 +2）');
+      f.p.destroy(); f.host.remove();
+    }
+
+    /* ---------- 7. 真实拖拽一整段 = 一步历史 ---------- */
+    {
+      var g = await mkLoaded({});
+      await selectAndSettle(g.p, g.stamp.id);
+      var k0 = g.p._history.length;
+      var st0 = g.p.getStamps()[0];
+      var scr = g.p.pdfToScreen(st0.x, st0.y);
+      var rect = g.p._overlay.getBoundingClientRect();
+      function pev(type, x, y) {
+        var ev;
+        try {
+          ev = new PointerEvent(type, { clientX: rect.left + x, clientY: rect.top + y,
+            pointerId: 7, button: 0, buttons: 1, pointerType: 'mouse', isPrimary: true,
+            bubbles: true, cancelable: true });
+        } catch (e2) { return null; }
+        return g.p._overlay.dispatchEvent(ev);
+      }
+      var okDrag = true;
+      try {
+        var target = null;
+        var list = g.p.getStamps();
+        for (var t = 0; t < list.length; t++) {
+          var sp = g.p.pdfToScreen(list[t].x, list[t].y);
+          if (Math.abs(sp.x - scr.x) < 1 && Math.abs(sp.y - scr.y) < 1) { target = list[t]; break; }
+        }
+        if (!target) okDrag = false;
+        pev('pointerdown', scr.x, scr.y);
+        for (var m = 1; m <= 8; m++) pev('pointermove', scr.x + m * 4, scr.y + m * 3);
+        pev('pointerup', scr.x + 32, scr.y + 24);
+      } catch (e3) { okDrag = false; }
+      if (!okDrag) {
+        rec('真实拖拽一整段 = 1 步历史', false, '拖拽事件派发失败（环境不支持 PointerEvent？）');
+        rec('拖拽结束后手势分组已关闭', false, '拖拽未发生');
+      } else {
+        rec('真实拖拽一整段 = 1 步历史',
+          g.p._history.length === k0 + 1,
+          'k0=' + k0 + ' now=' + g.p._history.length);
+        rec('拖拽结束后手势分组已关闭',
+          g.p._histGroupKey === null, 'groupKey=' + g.p._histGroupKey);
+      }
+      g.p.destroy(); g.host.remove();
+    }
+
+    /* ---------- 8. 换页（公开路径）重置历史并清掉分组状态 ---------- */
+    {
+      var h = await mkLoaded({});
+      await selectAndSettle(h.p, h.stamp.id);
+      hold(h.p, 'ArrowLeft', 5, false);
+      /* 换页重置历史是【画布模式 setPage()】的公开语义；
+         pdfjs 模式的 gotoPage() 不动签章与历史（另有 clearStampsOnPageChange 控制清签章），
+         所以这里必须走 setPage 公开路径，而不是拿 gotoPage 去验 setPage 的语义。 */
+      var pg = document.createElement('canvas');
+      pg.width = 595; pg.height = 842;
+      h.p.setPage({ canvas: pg, width: 595, height: 842, rotation: 0, pageNumber: 2, totalPages: 3 });
+      rec('换页后历史被重置为初始态',
+        h.p._history.length === 1 && h.p._historyIdx === 0,
+        'len=' + h.p._history.length + ' idx=' + h.p._historyIdx);
+      rec('换页后分组键与合并键都已清空（不留悬空状态）',
+        h.p._histGroupKey === null && h.p._histMergedKey === null,
+        'group=' + h.p._histGroupKey + ' merged=' + h.p._histMergedKey);
+      h.p.destroy(); h.host.remove();
+    }
+
+    /* ---------- 9. 分组不影响实时状态（只影响历史粒度） ---------- */
+    {
+      var k2 = await mkLoaded({});
+      k2.p.selectStamp(k2.stamp.id);
+      var changes = 0;
+      k2.p.on('change', function () { changes++; });
+      hold(k2.p, 'ArrowDown', 6, false);
+      rec('分组期间 change 事件仍逐次触发（不牺牲实时反馈）',
+        changes >= 6, 'change 次数=' + changes);
+      k2.p.destroy(); k2.host.remove();
+    }
+
+    /* ---------- 10. 快照隔离：历史条目是快照，后续改动不会污染已记录的历史 ---------- */
+    {
+      var l = await mkLoaded({});
+      l.p.selectStamp(l.stamp.id);
+      hold(l.p, 'ArrowLeft', 4, false);
+      var topX = l.p._history[l.p._history.length - 1][0].x;
+      var liveX = l.p.getStamps()[0].x;
+      rec('历史栈顶快照与实时状态一致',
+        topX === liveX, 'snapshot.x=' + topX + ' live.x=' + liveX);
+      // 再改一次（新分组）后，上一条历史必须保持原值
+      hold(l.p, 'ArrowLeft', 4, false);
+      var prevX = l.p._history[l.p._history.length - 2][0].x;
+      rec('新交互不会篡改上一条历史（快照隔离）',
+        prevX === topX, 'prev=' + prevX + ' 期望 ' + topX);
+      l.p.destroy(); l.host.remove();
+    }
+
+    say('——— 汇总见标题 / window.__RESULT__', 'ok');
+    __TEST.finish();
+  }
+
+  __TEST.expect(21);
+  run().catch(function (e) {
+    __TEST.record('测试脚本异常', false, String(e && e.message || e));
+    __TEST.finish();
+  });
+})();
+</script>
+</body>
+</html>

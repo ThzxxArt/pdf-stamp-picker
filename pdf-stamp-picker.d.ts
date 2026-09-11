@@ -226,13 +226,23 @@ export default class PdfStampPicker {
   getStamps(): (StampJSON & { user: { id: string; name: string; color: string } | null })[];
   getStampsByUser(userId: string): (StampJSON & { user: { id: string; name: string; color: string } | null })[];
   getActiveStamp(): (StampJSON & { user: { id: string; name: string; color: string } | null }) | null;
-  /** 撤销/重做 */
+  /** 撤销/重做（交互级粒度：一次拖拽 / 一次按住方向键 = 一步） */
   undo(): this;
   redo(): this;
+  /** 开始一次交互分组：该 key 生效期间的所有变更合并为一步撤销（由交互结束事件收尾） */
+  beginHistoryGroup(key: string): this;
+  /** 结束交互分组（幂等）。必须在交互结束时调用，否则下一次同 key 交互会被误并进上一步 */
+  endHistoryGroup(): this;
   /** 折叠/展开签章列表面板 */
   toggleList(): this;
   /** 导出当前页+签章点布局图为 PNG（dataURL） */
   exportImage(opts?: { scale?: number; includePdf?: boolean; includeUi?: boolean }): Promise<string>;
+  /**
+   * 程序化添加签章点（PDF 坐标）。`x`/`y` 为矩形左上角。
+   * `width`/`height` 缺省（或非有限数）时回落到当前模式的默认尺寸：
+   * `mode:'point'` → 0×0 坐标锚点；其余模式 → 与画布点击放置一致的章尺寸（`stampSize` 基准宽）。
+   * 显式传 `0,0` 仍表示坐标锚点。
+   */
   addStamp(sel: { x: number; y: number; width?: number; height?: number; page?: number; userId?: string; note?: string }): StampJSON;
   removeStamp(id: string): StampJSON | null;
   selectStamp(id: string): this;

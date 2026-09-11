@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>addStamp 缺省尺寸语义回归测试（0×0 空章陷阱）</title>
+<link rel="stylesheet" href="../vendor/pdf.min.css">
+<script src="../vendor/pdf.min.js"></script>
+<script src="test-harness.js?v=4.9.2"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.2"></script>
+<style>
+  body { font: 13px/1.6 -apple-system, "PingFang SC", sans-serif; margin: 12px; color: #e6e6e6; background: #16181d; }
+  h1 { font-size: 15px; }
+  #log div { padding: 2px 0; white-space: pre-wrap; }
+  .ok { color: #4ade80; } .bad { color: #f87171; } .sec { margin-top: 8px; font-weight: 700; color: #93c5fd; }
+  .host { position: fixed; left: -3000px; top: 0; width: 900px; height: 700px; }
+</style>
+</head>
+<body>
+<h1>addStamp 缺省尺寸语义回归测试</h1>
+<div id="log"></div>
+<script>
+/* ============================================================================
+ * 被验证的缺陷（"0×0 空章"）：
+ *   addStamp({x, y}) 省略 width/height 时，旧实现一律落 0×0。
+ *   0×0 只在 mode:'point'（坐标锚点）下是合法形态；在 rect / stamp 模式下，
+ *   章图按 0×0 绘制 = 什么都没画（Canvas 零尺寸 drawImage 是 no-op），
+ *   九宫格手柄全部叠在同一个像素点上，尺寸标签也因 width<=0 被跳过 ——
+ *   用户看到的是"点旁边孤零零一个序号角标"，既不像章也没有可拖拽的框，
+ *   却照样进入 JSON / 列表 / 撤销栈，且全程无报错。
+ *
+ * 本页用【真实渲染 + 真实像素计数】量化它，而不是靠读代码下结论：
+ *   · 对照组（显式 0×0）的墨迹像素数 —— 证明"章图确实没画出来"；
+ *   · 缺省尺寸放置后的墨迹像素数 —— 修好后应达到"章图真的画上去了"的量级。
+ *   两条断言互为参照：只断言"修复后 > 阈值"会随实现漂移而失效，
+ *   同时断言"对照组显著更少"才能锁住"0×0 是画不出东西的"这一事实。
+ * ========================================================================== */
+(function () {
+  var W = 595, H = 842;
+
+  function say(msg, cls) {
+    var d = document.createElement('div');
+    d.className = cls || '';
+    d.textContent = msg;
+    document.getElementById('log').appendChild(d);
+  }
+  function rec(name, pass, detail) { __TEST.record(name, pass, detail); }
+  function section(t) { say('■ ' + t, 'sec'); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function mkHost() {
+    var h = document.createElement('div');
+    h.className = 'host';
+    document.body.appendChild(h);
+    return h;
+  }
+
+  // 造一个已加载 test.pdf 且章图就绪的实例
+  async function mk(opts) {
+    var p = new PdfStampPicker(mkHost(), opts || {});
+    await p.load('test.pdf');
+    await p._ensureStampImage();   // 章图必须先就绪，否则测的是"图没加载"而不是"尺寸"
+    return p;
+  }
+
+  /* 覆盖层（overlay）墨迹像素计数：overlay 只画签章/选区（无网格时），
+   * 所以"墨迹增量 ≈ 这次放置实际画出来的东西"。用 backing store 全量统计，
+   * 避开 dpr 缩放带来的坐标换算误差。 */
+  function overlayInk(p) {
+    var ov = p._overlay;
+    if (!ov || !ov.width || !ov.height) return -1;
+    var d = ov.getContext('2d').getImageData(0, 0, ov.width, ov.height).data;
+    var n = 0;
+    for (var i = 3; i < d.length; i += 4) { if (d[i] > 8) n++; }
+    return n;
+  }
+
+  async function run() {
+    __TEST.start();
+    __TEST.expect(16);   // ①5 + ②2 + ③2 + ④4 + ⑤3
+
+    /* ---------- ① 缺省尺寸：应补齐为可用的章尺寸，而不是 0 ---------- */
+    section('① 缺省尺寸（默认 mode:stamp）');
+    var p1 = await mk({});
+    var base = overlayInk(p1);
+    var st1 = p1.addStamp({ x: W / 2, y: H / 2 });
+    await sleep(200);                                  // 等章图 onload + rAF 重绘
+    var ink1 = overlayInk(p1) - base;
+
+    rec('① 缺省 width/height 不为 0（不是空章）',
+      st1.width > 0 && st1.height > 0, 'w=' + st1.width + ' h=' + st1.height);
+    rec('① 缺省宽度 = stampSize 基准宽(120)',
+      st1.width === p1._options.stampSize, 'w=' + st1.width + ' vs stampSize=' + p1._options.stampSize);
+    rec('① 缺省高度按章图比例（方形内置章 → h≈w）',
+      Math.abs(st1.height - st1.width) <= 0.5, 'w=' + st1.width + ' h=' + st1.height);
+    rec('① 缺省尺寸放置后画布确实出现章图墨迹（验证"看得见"）',
+      ink1 > 3000, '墨迹增量=' + ink1 + ' px');
+    /* ★ 第二处根因的守卫：只设 _activeId 不同步 _sel 时，_paint 认为"活动签章由选区渲染器画"，
+       而选区渲染器因 _sel 为空根本不执行 → 画布 0 像素、getSelection() 也是 null。 */
+    rec('① addStamp 后选区与活动签章同步（getSelection() 不再为 null）',
+      !!p1.getSelection() && p1.getSelection().width === st1.width,
+      'getSelection=' + JSON.stringify(p1.getSelection()));
+    p1.destroy();
+
+    /* ---------- ② 对照组：显式 0×0（受支持的坐标锚点形态） ---------- */
+    section('② 对照组：显式 width:0,height:0（坐标锚点）');
+    var p2 = await mk({});
+    var base2 = overlayInk(p2);
+    var st2 = p2.addStamp({ x: W / 2, y: H / 2, width: 0, height: 0 });
+    await sleep(200);
+    var ink2 = overlayInk(p2) - base2;
+
+    rec('② 显式 0×0 被尊重（坐标锚点语义未被"缺省补尺寸"误伤）',
+      st2.width === 0 && st2.height === 0, 'w=' + st2.width + ' h=' + st2.height);
+    rec('② 对照组墨迹远少于缺省尺寸（证明 0×0 画不出章图）',
+      ink1 > 0 && ink2 * 4 < ink1, '0×0 墨迹=' + ink2 + ' px vs 缺省=' + ink1 + ' px');
+    p2.destroy();
+
+    /* ---------- ③ point 模式：缺省即锚点，0×0 是正确形态 ---------- */
+    section('③ mode:point 的缺省尺寸');
+    var p3 = await mk({ mode: 'point' });
+    var st3 = p3.addStamp({ x: 120, y: 300 });
+    rec('③ point 模式缺省 → 0×0（锚点形态，不自动补章尺寸）',
+      st3.width === 0 && st3.height === 0, 'w=' + st3.width + ' h=' + st3.height);
+    var st3b = p3.addStamp({ x: 160, y: 300, width: 60, height: 60 });
+    rec('③ point 模式显式给尺寸时不得被强制清零（换模式导入数据仍可读）',
+      st3b.width === 60 && st3b.height === 60, 'w=' + st3b.width + ' h=' + st3b.height);
+    p3.destroy();
+
+    /* ---------- ④ importJSON：历史/外部 JSON 缺 width/height ---------- */
+    section('④ importJSON 缺尺寸条目');
+    var p4 = await mk({});
+    await p4.importJSON({
+      users: [{ id: 'u1', name: '甲方' }],
+      stamps: [{ x: 200, y: 300, page: 1, userId: 'u1' }]
+    });
+    await sleep(200);
+    var got = p4.getStamps()[0] || {};
+    rec('④ 外部 JSON 缺 width/height 时补齐为可用尺寸（不再静默变空章）',
+      got.width > 0 && got.height > 0, 'w=' + got.width + ' h=' + got.height);
+    var rt = p4.toFlatJSON().stamps[0] || {};
+    rec('④ 补齐后的尺寸能正常往返 JSON',
+      rt.width > 0 && rt.height > 0, 'JSON w=' + rt.width + ' h=' + rt.height);
+    /* ★ 第三处根因的守卫：旧实现是 `if (users) {...} else if (stamps) {...}`，
+       两者并存时顶层 stamps[] 被整段静默忽略（resolve 成功、count=0、无异常） */
+    rec('④ users[] 与 stamps[] 并存时，顶层 stamps[] 不再被静默忽略',
+      p4.getStamps().length === 1, '导入签章点=' + p4.getStamps().length);
+    rec('④ users[] 里"仅声明"的签署方被登记（旧实现整条丢弃）',
+      p4.toJSON().users.some(function (g) { return g.user && g.user.id === 'u1'; }),
+      '用户=' + p4.toJSON().users.map(function (g) { return g.user ? g.user.id : '?'; }).join(','));
+    p4.destroy();
+
+    /* ---------- ⑤ 非法/边界输入：不应产生 NaN 尺寸 ---------- */
+    section('⑤ 边界输入');
+    var p5 = await mk({});
+    var st5 = p5.addStamp({ x: 100, y: 100, width: NaN, height: undefined });
+    rec('⑤ width:NaN 缺省回落到默认尺寸（不写入 NaN）',
+      isFinite(st5.width) && st5.width > 0 && isFinite(st5.height) && st5.height > 0,
+      'w=' + st5.width + ' h=' + st5.height);
+    var st6 = p5.addStamp({ x: 100, y: 400, width: null, height: 30 });
+    rec('⑤ width:null 同样回落默认（null 不等于"显式 0"）',
+      isFinite(st6.width) && st6.width > 0 && st6.height === 30,
+      'w=' + st6.width + ' h=' + st6.height);
+    var st7 = p5.addStamp({ x: 100, y: 500, width: 40, height: 20 });
+    rec('⑤ 正常显式尺寸不受影响',
+      st7.width === 40 && st7.height === 20, 'w=' + st7.width + ' h=' + st7.height);
+    p5.destroy();
+
+    __TEST.finish();
+    say(__TEST.summary().status === 'done'
+      ? ('完成：' + __TEST.summary().passed + '/' + __TEST.summary().total)
+      : '异常结束', 'sec');
+  }
+
+  run().catch(function (e) {
+    say('运行异常：' + (e && e.message), 'bad');
+    __TEST.fail(e);
+  });
+})();
+</script>
+</body>
+</html>

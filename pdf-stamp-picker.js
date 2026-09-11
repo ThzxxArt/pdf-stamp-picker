@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v4.9.1
+ * PdfStampPicker v4.9.2
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.9.1';
+  var VERSION = '4.9.2';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -66,6 +66,10 @@
   // ★ worker blob URL 全局缓存（跨实例共享）：worker 源码固定，fetch+Blob 只需做一次；
   //   blob URL 挂全局而非实例，避免实例 destroy 时 revoke 导致其他/后续实例的 workerSrc 悬空
   var _sharedWorkerBlob = { srcUrl: null, blobUrl: null };
+  /* cMaps 探测结果（库级静态资源，与实例无关 → 全页面只探一次）
+   * 历史问题：只存在实例上 → 每个新实例（含弹框每次打开）都重跑整条候选链的 HEAD 探测。 */
+  var _sharedCMap = { done: false, url: null };
+  var _sharedCMapPromise = null;
 
   var CSS = [
     /* ===== 基础 ===== */
@@ -402,6 +406,8 @@
     this._activeId = null;  // 活动签章 id
     this._history = [[]];      // 撤销栈（快照数组；仅浅拷贝标量，image 按引用共享）
     this._historyIdx = 0;   // 当前历史位置
+    this._histGroupKey = null;   // 当前交互分组键（beginHistoryGroup 设置；结束事件清空）
+    this._histMergedKey = null;  // 栈顶条目所属的合并键（用于判断能否覆盖栈顶）
     this._listeners = {};
     this._raf = 0;
     this._destroyed = false;
@@ -853,8 +859,7 @@
       self._stamps = [];
       self._activeId = null;
       self._sel = null;
-      self._history = [[]];
-      self._historyIdx = 0;
+      self._resetHistory();
       // 哈希落地：等待 Promise 写入（已写入则同步可见）
       if (self._pdfHashPromise) {
         self._pdfHashPromise.then(function (h) { if (self._isCurrentLoad(token)) self._pdfHash = h || null; })
@@ -1146,8 +1151,7 @@
     this._stamps = [];
     this._activeId = null;
     this._sel = null;
-    this._history = [[]];
-    this._historyIdx = 0;
+    this._resetHistory();
     this._lastError = null;
     // ★ 文档标识也要清：只清画布不清名字，会出现"文件名显示了、页数却是空的"自相矛盾状态
     //   （实测：加载中 abort() 后 toJSON().document.name 仍是未加载完的名字）
@@ -1178,26 +1182,8 @@
     // CMap 本地化：中文 PDF 离线不乱码（显式配置 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
     var cMapUrl = this._options.cMapUrl;
     if (cMapUrl === undefined && this._detectedCMapUrl === undefined) {
-      // 首次加载：先探测本地 cMaps/（同步串接，不阻塞主流程太久）
-      // ★ 用库位置（_libSrc）作探测基址，与 pdf.min.js 探测一致（异步时 currentScript 失效）
-      var scriptSrc = this._libSrc || (document.currentScript && document.currentScript.src) || null;
-      var cands = PdfStampPicker._localCandidates(window.location.href, scriptSrc);
-      var cMapCands = [];
-      cands.forEach(function (c) {
-        cMapCands.push(c.replace(/vendor\/pdf\.min\.js$/, 'cMaps/'));
-        cMapCands.push(c.replace(/vendor\/pdf\.min\.js$/, 'vendor/cMaps/'));
-      });
-      var idx = 0;
-      this._detectedCMapUrl = null;
-      var probe = function () {
-        if (idx >= cMapCands.length) return Promise.resolve();
-        var src = cMapCands[idx++];
-        return fetch(src + '78-EUC-H.bcmap', { method: 'HEAD' }).then(function (res) {
-          if (res.ok) { self._detectedCMapUrl = src; }
-          else throw new Error('no');
-        }).catch(probe);
-      };
-      return probe().then(function () {
+      // 首次加载：先取 cMaps 探测结果（模块级缓存，全页面只探一次）再解析
+      return this._probeCMap().then(function () {
         var u = self._options.cMapUrl || self._detectedCMapUrl || null;
         if (u) { cfg.cMapUrl = u; cfg.cMapPacked = true; }
         return self._resolveDoc(cfg, token);
@@ -1208,6 +1194,50 @@
       cfg.cMapPacked = true; // .bcmap 压缩格式
     }
     return this._resolveDoc(cfg, token);
+  };
+
+  /**
+   * 探测本地 cMaps/（中文 PDF 离线不乱码）。
+   * ★ 结果提升到【模块级缓存】：cMaps 是随库部署的静态资源，与实例无关。
+   *   历史问题：`_detectedCMapUrl` 只存在实例上 → 【每个新实例】都要把整条候选链重新 HEAD 一遍
+   *   （每个候选一次网络往返，候选全 404 时更慢）才能开始请求 PDF 本身。弹框模式每次打开都会
+   *   new 一个实例，于是每次打开都白付一轮探测开销，并且让"load() 到真正发起请求"之间的
+   *   延迟不可预测（对外部时序控制不友好）。
+   *   探测只做一次，候选去重，并发实例共享同一个 Promise。
+   */
+  PdfStampPicker.prototype._probeCMap = function () {
+    var self = this;
+    var apply = function (url) { self._detectedCMapUrl = url; };
+    if (_sharedCMap.done) { apply(_sharedCMap.url); return Promise.resolve(_sharedCMap.url); }
+    if (_sharedCMapPromise) {
+      return _sharedCMapPromise.then(function (url) { apply(url); return url; });
+    }
+    // ★ 用库位置（_libSrc）作探测基址，与 pdf.min.js 探测一致（异步时 currentScript 失效）
+    var scriptSrc = this._libSrc || (document.currentScript && document.currentScript.src) || null;
+    var cands = PdfStampPicker._localCandidates(window.location.href, scriptSrc);
+    var raw = [];
+    cands.forEach(function (c) {
+      raw.push(c.replace(/vendor\/pdf\.min\.js$/, 'cMaps/'));
+      raw.push(c.replace(/vendor\/pdf\.min\.js$/, 'vendor/cMaps/'));
+    });
+    // 候选去重（历史链里存在重复项，重复 HEAD 纯属浪费）
+    var seen = {}, uniq = [];
+    raw.forEach(function (u) { if (!seen[u]) { seen[u] = 1; uniq.push(u); } });
+    var idx = 0;
+    var probe = function () {
+      if (idx >= uniq.length) return Promise.resolve(null);
+      var src = uniq[idx++];
+      return fetch(src + '78-EUC-H.bcmap', { method: 'HEAD' }).then(function (res) {
+        if (res.ok) return src;
+        return probe();
+      }).catch(function () { return probe(); });
+    };
+    _sharedCMapPromise = probe().then(function (url) {
+      _sharedCMap.done = true;
+      _sharedCMap.url = url || null;
+      return _sharedCMap.url;
+    });
+    return _sharedCMapPromise.then(function (url) { apply(url); return url; });
   };
 
   /**
@@ -1519,8 +1549,7 @@
       this._stamps = [];
       this._activeId = null;
       this._sel = null;
-      this._history = [[]];
-      this._historyIdx = 0;
+      this._resetHistory();
     }
     // 纯画布模式无 PDF 字节 → 清哈希缓存（防 toJSON 输出旧 load 的哈希）
     this._pdfBytes = null;
@@ -2158,7 +2187,7 @@
 
     var firstPage = 0;
     var batchCount = 0;
-    var skipped = 0;                          // H4：坏条目计数（不再静默丢弃）
+    var skipped = parsed.ignored || 0;        // H4：坏条目计数（不再静默丢弃）
     var failure = null;
     var savedUserId = this._currentUserId;    // 记录导入前用户，结束后还原
     // ★ D8 根治：用 try/finally 保证临时切换的 _currentUserId 一定还原 ——
@@ -2265,7 +2294,16 @@
     document.body.appendChild(el);
   };
 
-  PdfStampPicker.prototype._toast = function (msg, ms) {
+  /**
+   * 轻提示（屏幕顶部 toast）。
+   * @param {string} msg 文案
+   * @param {number} [ms] 展示时长
+   * @param {string} [dedupeKey] 去重键：与上一条【相同键且仍在展示窗口内】时直接忽略。
+   *        用途：按住方向键微调时 _checkOverlap 每帧都会判定重叠 → 同一句警告每秒弹 30 次，
+   *        既闪烁又打断操作。key 相同即视为"同一件事的重复播报"，不刷新计时器、不重启动画。
+   *        传 null/省略 = 不去重（保持旧行为）。
+   */
+  PdfStampPicker.prototype._toast = function (msg, ms, dedupeKey) {
     if (typeof document === 'undefined') return;
     var self = this;
     var el = document.body.querySelector('.psp-toast');
@@ -2278,9 +2316,15 @@
     var now = Date.now();
     var shownAt = el._shownAt || 0;
     var remain = ms || 1600;
+    // 去重：同键且在展示窗口内 → 忽略（不重置计时器，避免"永远不消失"）
+    if (dedupeKey && el._dedupeKey === dedupeKey && shownAt && now - shownAt < (el._dedupeUntil || 0)) {
+      return;
+    }
+    if (dedupeKey) el._dedupeKey = dedupeKey;
     if (shownAt && now - shownAt < 600) {
       remain = Math.max(remain, 600 - (now - shownAt) + (ms || 1600));
     }
+    el._dedupeUntil = remain;
     el._shownAt = now;
     el.textContent = msg;
     el.classList.remove('psp-toast-hide');
@@ -2291,14 +2335,46 @@
   };
 
   /**
-   * 程序化添加/更新签章点（PDF 坐标）。
-   * @param {{x:number,y:number,width?:number,height?:number,page?:number,userId?:string,note?:string}} sel
+   * 缺省尺寸（width/height 未给时用）。
+   *
+   * ★ 为什么必须有这个函数（"0×0 空章"根治点）：
+   *   历史实现缺省一律落 0×0。但 0×0 只在 `mode:'point'` 下是**正确形态**（签章点 = 坐标锚点）；
+   *   在 `rect` / `stamp` 模式下它是个"退化矩形"：Canvas 对零尺寸 drawImage 是 no-op
+   *   （章图一个字都没画）、九宫格手柄全部叠在同一个像素上、尺寸标签因 width<=0 被跳过、
+   *   命中测试也退化成 12px 半径的点选 —— 用户看到"点旁边孤零零一个序号角标"，
+   *   既不像章也拖不出框，**却照样进 JSON / 进列表 / 进撤销栈，且全程无异常**。
+   *   这正是最难排查的一类缺陷：内部自洽（往返 JSON 合法、往返坐标正确），
+   *   只是"没有可用的产物"。所以缺省值必须与"在画布上点一下"的产物一致，而不是 0。
+   *
+   * 选择依据（为什么不是抛错）：两种默认都可能误判调用者意图，
+   *   于是取**失败可见**的那个 —— 补成章尺寸 → 用户立刻看到一个章，位置不对能马上发现；
+   *   落 0×0 → 用户什么都看不到，且没有任何信号。
+   */
+  PdfStampPicker.prototype._defaultStampSize = function () {
+    if (this._options.mode === 'point') return { w: 0, h: 0 };   // 锚点形态：0×0 即正确
+    return this._stampDisplaySize();                             // 与点击放置完全一致
+  };
+
+  /**
+   * 程序化添加签章点（PDF 坐标）。
+   *
+   * 尺寸语义：`width`/`height` 只接受**有限且 ≥0 的数字**；
+   *   · 显式 `0` 合法 → 坐标锚点形态（点选模式的数据原样保留）；
+   *   · 缺省 / `undefined` / `null` / `NaN` / 负数 / 非数字 → 回落到 `_defaultStampSize()`
+   *     （point 模式 0×0；其余模式 = 当前章图按 `stampSize` 的显示尺寸，
+   *      与"在画布上点一下"得到的结果完全一致）。
+   *   `x`,`y` 始终是矩形**左上角**（与 `getSelection()` / JSON 输出一致），不随缺省尺寸而改变含义。
+   *
+   * @param {{x:number,y:number,width?:number,height?:number,page?:number,userId?:string,note?:string,image?:object}} sel
    * @returns {object} 新签章点
    */
   PdfStampPicker.prototype.addStamp = function (sel) {
     if (!sel || typeof sel.x !== 'number' || typeof sel.y !== 'number') {
       throw new Error('[PdfStampPicker] addStamp 需要 {x, y[, width, height]}');
     }
+    var def = this._defaultStampSize();
+    var w = (typeof sel.width === 'number' && isFinite(sel.width) && sel.width >= 0) ? sel.width : def.w;
+    var h = (typeof sel.height === 'number' && isFinite(sel.height) && sel.height >= 0) ? sel.height : def.h;
     var page = sel.page || this._pageNumber;
     // 快照公章图（内部绘制用；JSON 输出不含 image）：
     // 优先外部传入（importJSON 反显），否则快照当前用户章
@@ -2312,16 +2388,30 @@
       page: page,
       rotation: this._rotation,
       x: sel.x, y: sel.y,
-      width: (sel.width !== undefined) ? sel.width : 0,
-      height: (sel.height !== undefined) ? sel.height : 0,
+      width: w,
+      height: h,
       image: img,
       note: sel.note || '',
       createdAt: new Date().toISOString()
     };
     this._stamps.push(stamp);
     this._activeId = stamp.id;
+    /* ★ 与 _activeId 同步选区（根治"加了签章却在画布上看不见"）：
+     *   _paint 的渲染约定是【活动签章由 _drawRectSel 画、_drawStamps 跳过它】。
+     *   旧实现只设 _activeId 不设 _sel → 两条路径都不画：_drawStamps 认为"它是活动的，不归我画"，
+     *   而 _drawRectSel 又因 this._sel 为空而根本不执行 → **画布上一个像素都不出**，
+     *   同时 getSelection() 返回 null（"没有选区"），于是既看不见、也拿不到数据、还没有任何报错。
+     *   这是与"0×0 空章"并列的第二个根因：前者是尺子不对，后者是压根没人画。
+     *   跨页签章点不在此处同步（否则会把别页坐标画到当前页的选区内，_commitActive 回写即坐标污染），
+     *   交给 selectStamp() 的"先 gotoPage 再同步"路径处理。 */
+    var onCurPage = stamp.page === this._pageNumber && this._displayW > 0;
+    if (!sel._batch) {
+      if (onCurPage) this._syncSelFromStamp(stamp);
+      else this._sel = null;
+    }
     // 批量模式（importJSON）：跳过中间渲染/历史/事件，由批量收尾统一处理（性能优化）
     if (!sel._batch) {
+      this._paint();                 // 立即重绘：新签章点必须立刻可见
       this._pushHistory();
       this._renderList();
       this._emit('stampadd', stamp);
@@ -2348,7 +2438,9 @@
     });
     if (overlaps.length) {
       var names = overlaps.map(function (o) { return o.name; }).join('、');
-      this._toast('⚠️ 与「' + names + '」的签章点重叠');
+      // dedupeKey：同一章与同一批对象的重叠在展示窗口内只播报一次（微调时会每帧命中）
+      var key = 'overlap:' + stamp.id + ':' + overlaps.map(function (o) { return o.id; }).sort().join(',');
+      this._toast('⚠️ 与「' + names + '」的签章点重叠', 1600, key);
       this._emit('overlap', { stamp: stamp, overlaps: overlaps });
     }
   };
@@ -2393,16 +2485,79 @@
   /* ---------------- 撤销/重做 ---------------- */
 
   /** 记录当前签章状态到历史栈（**变更后**调用，push 新状态） */
-  PdfStampPicker.prototype._pushHistory = function () {
+  /* ================= 历史：交互级合并（根治"高频变更淹没历史栈"） =================
+   * 问题类别（不只是键盘）：历史栈是"每次变更入一条快照"的模型，但它不认识「一次用户交互」。
+   * 于是任何高频变更源都会把栈冲爆：
+   *   · 按住方向键微调：浏览器按键重复 ≈ 每秒 30 次 → historyLimit=50 时按住不到 2 秒，
+   *     整个撤销栈就被一次微调挤干净，用户再也撤不回之前任何操作；
+   *   · 拖拽/缩放若将来改为实时提交，同样会一条一帧；
+   *   · 程序化批量变更（导入、批量删除）同理。
+   * 只给键盘加防抖是"打补丁"：治不了拖拽/批量，也治不了将来新增的高频源。
+   *
+   * 根治：给历史层引入【交互分组】协议 —— 变更方显式声明"我属于哪一次交互"，
+   * 历史层负责把同一次交互内的所有变更【压成一条】：
+   *     beginHistoryGroup(key)  →  该 key 生效期间，_pushHistory(mergeKey) 覆盖栈顶而非新增
+   *     endHistoryGroup()       →  结束交互，下一次变更是新的历史条目
+   * 由交互的**结束事件**（keyup / pointerup / blur / destroy）驱动，不用计时器 ——
+   * 行为完全确定、可重复测试，也不受机器快慢影响。
+   */
+  PdfStampPicker.prototype.beginHistoryGroup = function (key) {
+    if (key == null) return this;
+    this._histGroupKey = String(key);
+    return this;
+  };
+
+  /**
+   * 结束当前历史分组（幂等，可重复调用）。
+   * ★ 必须【同时】清掉栈顶合并键：只清分组键的话，下一次交互若用了同一个 key
+   *   （例如同一个签章再按一次方向键），仍会和上一次交互的栈顶合并 → 少一步撤销。
+   *   这一步是"一次交互 = 一步历史"的关键，单测 test/history.test.js 第 3 节专门盯它。
+   */
+  PdfStampPicker.prototype.endHistoryGroup = function () {
+    this._histGroupKey = null;
+    this._histMergedKey = null;
+    return this;
+  };
+
+  /**
+   * 清空撤销栈（换文档 / 换页 / 重建时调用）。
+   * ★ 集中成一个入口：历史上这段"清栈"代码在 3 处各抄了一份，加了分组键之后
+   *   任何一处漏改都会留下"分组键指向已废弃历史"的悬空状态 —— 统一入口是根治。
+   */
+  PdfStampPicker.prototype._resetHistory = function () {
+    this._history = [[]];
+    this._historyIdx = 0;
+    this._histGroupKey = null;
+    this._histMergedKey = null;
+    return this;
+  };
+
+  /**
+   * 记录一步历史。
+   * @param {string} [mergeKey] 合并键：与上一次入栈的键相同、且仍连续处于栈顶时，
+   *        本次【覆盖栈顶快照】而不是新增一条（即"同一次交互只留最终结果"）。
+   *        省略时取当前分组键（beginHistoryGroup 设置的）。
+   */
+  PdfStampPicker.prototype._pushHistory = function (mergeKey) {
     // ★ 用 snapshotStamps 而非 JSON.stringify：后者会把每个签章点的 base64 章图
     //   完整复制进每一条历史（上限 50 条），带图签章多时内存成倍放大。
     //   快照只浅拷贝标量，image 对象按引用共享（库内 image 只读，安全）。
     var snapshot = snapshotStamps(this._stamps);
+    var key = mergeKey || this._histGroupKey || null;
     // 若当前不在栈顶（已 undo 过），丢弃 redo 分支
     if (this._historyIdx < this._history.length - 1) {
       this._history = this._history.slice(0, this._historyIdx + 1);
+      this._histMergedKey = null;   // 历史分支被截断 → 之前的合并上下文失效
+    }
+    // 同一次交互的后续变更：覆盖栈顶（把整段连续操作压成一步）。
+    // length > 1 保证永远不会覆盖索引 0 的初始状态。
+    if (key && key === this._histMergedKey && this._history.length > 1) {
+      this._history[this._history.length - 1] = snapshot;
+      this._historyIdx = this._history.length - 1;
+      return;
     }
     this._history.push(snapshot);
+    this._histMergedKey = key;
     var limit = clamp(this._options.historyLimit || 50, 1, 500);
     if (this._history.length > limit + 1) this._history.shift(); // 上限 N 步 + 初始
     this._historyIdx = this._history.length - 1;
@@ -2412,6 +2567,8 @@
   PdfStampPicker.prototype.undo = function () {
     if (this._historyIdx <= 0) return this;
     this._historyIdx--;
+    // 撤销后合并上下文失效：否则下一次变更会把"刚撤回来的那一步"原地覆盖掉
+    this._histMergedKey = null;
     this._restoreFromHistory();
     return this;
   };
@@ -2420,6 +2577,7 @@
   PdfStampPicker.prototype.redo = function () {
     if (this._historyIdx >= this._history.length - 1) return this;
     this._historyIdx++;
+    this._histMergedKey = null;
     this._restoreFromHistory();
     return this;
   };
@@ -2639,6 +2797,8 @@
       move: function (e) { self._onPointerMove(e); },
       up: function (e) { self._onPointerUp(e); },
       key: function (e) { self._onKeyDown(e); },
+      keyup: function (e) { self._onKeyUp(e); },
+      blur: function () { self.endHistoryGroup(); },
       wheel: function (e) { self._onWheel(e); },
       resize: function () { self._onResize(); }
     };
@@ -2648,6 +2808,10 @@
     this._overlay.addEventListener('pointercancel', this._handlers.up);
     this._overlay.addEventListener('wheel', this._handlers.wheel, { passive: true });
     this._root.addEventListener('keydown', this._handlers.key);
+    this._root.addEventListener('keyup', this._handlers.keyup);
+    /* 失焦兜底：按住方向键时切走窗口可能收不到 keyup，
+     * 若不收尾，下一次按键会错误地并入上一次的分组（少一步撤销）。 */
+    this._root.addEventListener('blur', this._handlers.blur, true);
     this._pinch = null; // 双指缩放状态 {dist, zoom}
     if (typeof ResizeObserver !== 'undefined') {
       this._ro = new ResizeObserver(function () { self._onResize(); });
@@ -2728,6 +2892,10 @@
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     // 未加载页面时忽略点击（_displayW=0 会产生无效坐标）
     if (!this._displayW || !this._displayH) return;
+    /* 一次按下→抬起视为【一次交互】：期间任何变更都并入同一条历史。
+     * 目前拖拽只在抬起时提交一次，这里先建好分组是为了让"将来改成实时提交"
+     * 或"按下即产生的变更"自动获得正确的历史粒度（协议先于需求存在）。 */
+    this.beginHistoryGroup('gesture:' + (e.pointerId != null ? e.pointerId : 'default'));
     // 双指缩放：第二个指针按下时记录起始距离
     if (!this._ptrs) this._ptrs = {};
     this._ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
@@ -2922,6 +3090,8 @@
       delete this._ptrs[e.pointerId];
       if (Object.keys(this._ptrs).length < 2) this._pinch = null;
     }
+    // 手势结束 → 关闭历史分组（多指场景下等最后一指抬起）
+    if (!this._ptrs || Object.keys(this._ptrs).length === 0) this.endHistoryGroup();
     var d = this._drag;
     if (!d) return;
     this._drag = null;
@@ -2968,6 +3138,11 @@
     if (!this._sel && !this._activeId) return;
     var step = e.shiftKey ? 10 : 1;
     var handled = true;
+    // ★ 方向键微调属于【同一次按住交互】：浏览器按键重复每秒约 30 次，
+    //   不加分组会把整个撤销栈冲干净（详见 _pushHistory 上方说明）。
+    //   分组由 keyup / blur 关闭 —— 一次按住 = 一步撤销，两次轻点 = 两步。
+    var isNudge = (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown');
+    if (isNudge) this.beginHistoryGroup('nudge:' + (this._activeId || 'sel') + ':' + step);
     switch (e.key) {
       case 'ArrowLeft': this._moveSel(-step, 0); break;
       case 'ArrowRight': this._moveSel(step, 0); break;
@@ -2978,6 +3153,14 @@
       default: handled = false;
     }
     if (handled) e.preventDefault();
+  };
+
+  /* 按键抬起 → 结束本次"按住微调"交互分组（下一次按键会是新的历史条目）。
+   * 用真实结束事件而非计时器：行为确定，不受机器快慢与按键重复速率影响。 */
+  PdfStampPicker.prototype._onKeyUp = function (e) {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      this.endHistoryGroup();
+    }
   };
 
   PdfStampPicker.prototype._moveSel = function (dx, dy) {
@@ -3358,7 +3541,11 @@
       this._overlay.removeEventListener('pointercancel', this._handlers.up);
       this._overlay.removeEventListener('wheel', this._handlers.wheel);
     }
-    if (this._root && this._handlers) this._root.removeEventListener('keydown', this._handlers.key);
+    if (this._root && this._handlers) {
+      this._root.removeEventListener('keydown', this._handlers.key);
+      this._root.removeEventListener('keyup', this._handlers.keyup);
+      this._root.removeEventListener('blur', this._handlers.blur, true);
+    }
     // 取消未完成的渲染任务
     if (this._renderTask) { try { this._renderTask.cancel(); } catch (e) { /* ignore */ } this._renderTask = null; }
     // 中止未完成的加载
@@ -4035,27 +4222,41 @@
   function parseImportJSON(json) {
     var stamps = [];
     var users = [];
+    var ignored = 0;                                  // 结构上被丢弃的条目数（不再无声）
     if (!json || typeof json !== 'object') {
       throw new Error('[PdfStampPicker] importJSON 需要 JSON 对象');
     }
-    if (Array.isArray(json.users)) {
+    var hasGrouped = Array.isArray(json.users);
+    if (hasGrouped) {
+      /* users[] 两种写法都接受：
+       *   · 分组 {user:{id,name}, stamps:[...]}（toJSON 输出，签章点继承该用户）
+       *   · 仅声明签署方 {id,name}（"我要甲乙丙三个签署方"的常见手写配置）            ← 新增
+       * 旧实现 `if (!g.user) return;` 把第二种整条丢弃：users 里声明了 3 个签署方，
+       * 导入后一个都没有，且没有任何提示。 */
       json.users.forEach(function (g) {
-        if (!g || !g.user) return;
-        users.push(g.user);
+        var u = (g && g.user) ? g.user : ((g && g.id) ? g : null);
+        if (!u) { ignored++; return; }
+        users.push(u);
         (g.stamps || []).forEach(function (st) {
-          stamps.push(Object.assign({ userId: g.user.id }, st));
+          stamps.push(Object.assign({ userId: u.id }, st));
         });
       });
-    } else if (Array.isArray(json.stamps)) {
+    }
+    if (Array.isArray(json.stamps)) {
+      /* ★ 修复：旧实现是 `if (users) {...} else if (stamps) {...}` —— 两种键**同时出现**时
+       * 走上面那个分支，顶层 stamps[] 被**整段静默忽略**：importJSON 正常 resolve、
+       * import 事件 count=0、skipped=0、无异常，用户只看到"什么都没导入进来"。
+       * 手写配置 `{users:[...], stamps:[...]}`（声明签署方 + 平铺签章点）正中此坑。
+       * 现改为两者都收：users[] 声明签署方，顶层 stamps[] 逐条并入。 */
       json.stamps.forEach(function (st) {
-        if (!st) return;
-        users.push(st.user || null);
+        if (!st) { ignored++; return; }
+        if (st.user) users.push(st.user);             // 平铺结构内嵌的用户信息
         stamps.push(Object.assign({}, st));
       });
-    } else {
+    } else if (!hasGrouped) {
       throw new Error('[PdfStampPicker] importJSON 结构无法识别（需 users[] 或 stamps[]）');
     }
-    return { stamps: stamps, users: users };
+    return { stamps: stamps, users: users, ignored: ignored };
   }
 
   PdfStampPicker._internals = { buildJSON: buildJSON, buildFlatJSON: buildFlatJSON, parseImportJSON: parseImportJSON, genId: genId, normalizeRotation: normalizeRotation,

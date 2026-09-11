@@ -15,8 +15,8 @@ body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
 <p class="info" id="ver"></p>
 <div id="log"></div>
 <div id="stage"></div>
-<script src="../pdf-stamp-picker.js?v=4.9.1"></script>
-<script src="test-harness.js?v=4.9.1"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.2"></script>
+<script src="test-harness.js?v=4.9.2"></script>
 <script>
 var log = document.getElementById('log');
 function say(msg, cls) {
@@ -42,28 +42,52 @@ function record(name, pass, detail) {
 }
 function isAbort(e) { return !!(e && (e.name === 'AbortError' || e.superseded)); }
 
-/* 用真实 pdf.js，但给 getDocument 注入可控延迟（window.__delay 毫秒） */
+/* 用真实 pdf.js，但给 getDocument 注入可控延迟。
+ *
+ * ★ 这里必须用【一次性闩锁】window.__delayOnce，而不是读即时的 window.__delay：
+ *   用例的写法是 `window.__delayOnce = 800; var pr = p.load(...); window.__delay = 0;`
+ *   —— 末尾那句是**同步**执行的，而 load() 内部到达 getDocument 前隔着若干 await（微任务），
+ *   等真正调用 getDocument 时即时值早被清零 → 延迟**形同虚设**，
+ *   这些"慢加载"用例实际退化成"靠真实解析耗时碰运气在 80ms 内还没解析完"。
+ *   后果是 ⑥/⑪a 这类中止用例在机器变快/路径变快（如 cMap 探测命中缓存）后
+ *   随机翻车，而失败信息看起来像库的并发缺陷 —— 排查方向被彻底带偏。
+ *   改成闩锁后：设一次只对"下一次 getDocument"生效，与调用时序无关，确定性成立。
+ * （window.__delay 仍保留为兜底，兼容老写法） */
 function installDelayMock() {
-  var lib = window.pdfjsLib;
-  var real = lib.getDocument;
   window.__delay = 0;
-  lib.getDocument = function (cfg) {
-    var d = window.__delay || 0;
-    if (!d) return real.call(lib, cfg);
-    return {
-      promise: new Promise(function (res, rej) {
-        setTimeout(function () { real.call(lib, cfg).promise.then(res, rej); }, d);
-      })
+  window.__delayOnce = 0;
+  window.__lastGdDelay = -1;
+  window.__gdLog = [];            // 每次 getDocument 的 {url, 实际延迟, 时刻}，排查"延迟被谁吃掉"
+  /* ★ 必须走 __TEST.swapGlobalMethod，不能写 `window.pdfjsLib.getDocument = fn`：
+     pdf.min.js 用 webpack 的 Object.defineProperty(exports,'getDocument',{get}) 导出，
+     描述符是 {enumerable:true, configurable:false} —— 无 setter 且不可重定义，
+     直接赋值在非严格模式下【静默失败】：不报错、也不生效，
+     于是下面所有 __delayOnce 形同虚设、用例退化成"赌真实解析耗时"（本次实测 __gdLog=[]）。
+     该原语会克隆宿主绕开只读 getter，并在装不上时抛错（不允许静默降级）。*/
+  __TEST.swapGlobalMethod('pdfjsLib', 'getDocument', function (real, holder) {
+    return function (cfg) {
+      var d = window.__delayOnce || window.__delay || 0;
+      window.__delayOnce = 0;
+      window.__lastGdDelay = d;
+      window.__gdLog.push({
+        url: (typeof cfg === 'string' ? cfg : ((cfg && cfg.url) || '')),
+        d: d, t: Math.round(performance.now())
+      });
+      if (!d) return real.call(holder, cfg);
+      return {
+        promise: new Promise(function (res, rej) {
+          setTimeout(function () { real.call(holder, cfg).promise.then(res, rej); }, d);
+        })
+      };
     };
-  };
+  });
 }
 
 /* ① D3：并发 load —— 慢 A 被快 B 取代，状态必须是 B 的 */
 async function t1_concurrent() {
   var p = mk({ users: [{ id: 'a', name: '甲方' }] });
-  window.__delay = 600;
+  window.__delayOnce = 600;
   var pA = p.load('test.pdf');                  // 3 页
-  window.__delay = 0;
   await sleep(50);
   var pB = p.load('eight-page.pdf');            // 8 页
   var r = await Promise.allSettled([pA, pB]);
@@ -74,7 +98,6 @@ async function t1_concurrent() {
   record('① 并发 load：实例状态属于新文档（无混合状态）',
     bOk && p._totalPages === 8 && p._pageNumber === 1 && /eight-page/.test(p._docName || ''),
     'pages=' + p._totalPages + ' name=' + p._docName + ' pageNumber=' + p._pageNumber);
-  window.__delay = 0;
   p.destroy();
 }
 
@@ -122,9 +145,8 @@ async function t4_stale_hashurl() {
   hA = await ref.getHash();
   ref.destroy();
 
-  window.__delay = 400;                          // 让 A 的解析慢一点，制造"补算与切换重叠"
+  window.__delayOnce = 400;                          // 让 A 的解析慢一点，制造"补算与切换重叠"
   var pA = p.load('test.pdf').catch(function () {});
-  window.__delay = 0;
   await sleep(30);
   await p.load({ url: 'eight-page.pdf', headers: { 'X-T': '1' } });
   var hB = await p.getHash();
@@ -133,7 +155,6 @@ async function t4_stale_hashurl() {
   record('④ 陈旧 hashUrl 补算不回写、不误发 hashready',
     !leaked && p._pdfHash === hB && hB !== hA,
     'hashready次数=' + readyHashes.length + ' 泄漏A=' + leaked + ' 当前=' + (p._pdfHash || 'NULL').slice(0, 12) + '…');
-  window.__delay = 0;
   p.destroy();
 }
 
@@ -155,15 +176,19 @@ async function t6_abort() {
   var p = mk();
   var errors = 0;
   p.on('error', function () { errors++; });
-  window.__delay = 800;
+  window.__delayOnce = 800;
   var pr = p.load('eight-page.pdf');
-  window.__delay = 0;
   await sleep(80);
   p.abort();
   var err = null;
   try { await pr; } catch (e) { err = e; }
   record('⑥ abort() 中止在途加载：AbortError 且不派发 error',
     isAbort(err) && errors === 0, 'err=' + (err && err.name) + ' error事件=' + errors);
+  /* 前提自检：延迟必须真的落到这次 load 上。否则 load 会在 80ms 前跑完，
+     abort() 变成空操作 → 用例"看起来在测中止，其实什么都没测"（历史上正是如此，且随机翻车）。 */
+  record('⑥ 前提自检：注入延迟确实生效（不是靠真实耗时碰运气）',
+    window.__lastGdDelay === 800, '本次 getDocument 延迟=' + window.__lastGdDelay
+      + ' 最近调用=' + JSON.stringify(window.__gdLog.slice(-2)));
   p.destroy();
 }
 
@@ -172,9 +197,8 @@ async function t7_destroy_inflight() {
   var p = mk();
   var errors = 0;
   p.on('error', function () { errors++; });
-  window.__delay = 600;
+  window.__delayOnce = 600;
   var pr = p.load('eight-page.pdf').catch(function (e) { return e; });
-  window.__delay = 0;
   await sleep(60);
   p.destroy();
   var err = await pr;                            // 不应抛出未捕获异常
@@ -252,12 +276,15 @@ async function t11_no_half_loaded_residue() {
 
   // a) 加载中 abort
   var p = mk();
-  window.__delay = 800;
+  window.__delayOnce = 800;
   var pr = p.load('eight-page.pdf');
-  window.__delay = 0;
   await sleep(80);
   p.abort();
   try { await pr; } catch (e) { /* 预期 AbortError */ }
+  /* ★ 关键：abort 之后还要等被延迟的那次真实解析彻底落地（__delayOnce=800），
+     再断言状态——否则"此刻是空的"可能只是"还没加载完"，验不到
+     "迟到的加载结果不再回写状态"这条真正的不变量（H1 的核心）。 */
+  await sleep(1200);
   var d1 = p.toJSON().document;
   record('⑪a 中止后回到"未加载"状态（名字/页数/哈希）',
     d1.name === freshDoc.name && d1.pages === freshDoc.pages && !d1.hash && d1.hashStatus === freshDoc.hashStatus,
@@ -280,14 +307,24 @@ async function t11_no_half_loaded_residue() {
 (async function run() {
   document.getElementById('ver').textContent = '库版本 ' + PdfStampPicker.version;
   __TEST.start('H1 加载生命周期回归测试');
-  __TEST.expect(16);   // 断言条数写死：漏跑即失败（防止"少测了"被当全绿）
+  __TEST.expect(17);   // 断言条数写死：漏跑即失败（防止"少测了"被当全绿）
   try {
     await PdfStampPicker.loadPdfJsAuto();
-    installDelayMock();
-    say('pdf.js 已就绪，延迟注入器已安装', 'info');
   } catch (e) {
     say('pdf.js 加载失败：' + e.message, 'bad');
     record('pdf.js 加载', false, e.message);
+    __TEST.finish();
+    return;
+  }
+  try {
+    installDelayMock();
+    say('pdf.js 已就绪（v' + (window.pdfjsLib.version || '?') + '，延迟注入器已安装并自检通过）', 'info');
+  } catch (e) {
+    /* 桩装不上 → 本页所有"带延迟"的用例（①④⑥⑦⑪a）前提为假，
+       必须显式失败。绝不能静默继续：那样它们会退化成"赌真实耗时"，
+       随机翻车且失败信息全部指向被测库（历史上正是如此）。*/
+    say('延迟注入器安装失败：' + e.message, 'bad');
+    record('延迟注入器安装（本页带延迟用例的前提）', false, e.message);
     __TEST.finish();
     return;
   }

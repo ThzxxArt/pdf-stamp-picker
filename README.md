@@ -516,7 +516,7 @@ new PdfStampPicker('#stage', { toolbar: false });
 | **用户** | `setCurrentUser(id)` / `getCurrentUser()` | 切换/获取当前签署方（公章名字随之更新） |
 | | `addUser({id,name,color})` | 添加签署方（工具栏下拉同步） |
 | | `removeUser(id)` | 移除签署方及其签章点（不可移除当前用户） |
-| **签章点** | `addStamp({x,y,width,height,page,userId,note})` | 程序化添加签章点（PDF 坐标）→ 返回 stamp |
+| **签章点** | `addStamp({x,y,width,height,page,userId,note})` | 程序化添加签章点（PDF 坐标，`x/y` = 左上角）→ 返回 stamp。**尺寸缺省时按模式补齐**：`point` 模式 → 0×0 锚点；其余模式 → 与点击放置一致的章尺寸（显式传 `0,0` 仍为锚点） |
 | | `getStamps()` | 全部签章点数组（扁平，带 user） |
 | | `getStampsByUser(userId)` | 某签署方的签章点 |
 | | `getActiveStamp()` / `getSelection()` | 当前选中签章点 / 活动选区（PDF 坐标） |
@@ -528,7 +528,7 @@ new PdfStampPicker('#stage', { toolbar: false });
 | | `toFlatJSON({includeImage})` | 扁平版（stamps[] 内嵌 user） |
 | | `importJSON(json, opts)` | 从 JSON 反显（`users[]` 或 `stamps[]` 均可） |
 | | `copyJSON()` | 复制 JSON 到剪贴板（内置 toast） |
-| **撤销** | `undo()` / `redo()` | 撤销/重做（Ctrl+Z / Ctrl+Shift+Z，上限 `historyLimit`，默认 50 步） |
+| **撤销** | `undo()` / `redo()` | 撤销/重做（Ctrl+Z / Ctrl+Shift+Z，上限 `historyLimit`，默认 50 步）。**历史粒度 = 一次交互**：一次拖拽 / 一次按住方向键只占一步（`beginHistoryGroup(key)` / `endHistoryGroup()` 供自定义交互复用） |
 | **面板** | `toggleList()` | 折叠/展开签章列表面板 |
 | **导出** | `exportImage(opts)` | 导出当前页+签章布局为 PNG：`{scale=2, includePdf=true, includeUi=false}`；`includePdf:false` 得透明底章图 |
 | **坐标** | `screenToPdf(x,y)` / `pdfToScreen(x,y)` | 屏幕 px ↔ PDF pt（含旋转补偿） |
