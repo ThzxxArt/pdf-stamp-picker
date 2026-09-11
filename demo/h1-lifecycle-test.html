@@ -16,8 +16,8 @@ body{background:#16181d;color:#e6e6e6;font:13px/1.7 monospace;padding:14px}
 <p class="info" id="ver"></p>
 <div id="log"></div>
 <div id="stage"></div>
-<script src="../pdf-stamp-picker.js?v=4.9.5"></script>
-<script src="test-harness.js?v=4.9.5"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.6"></script>
+<script src="test-harness.js?v=4.9.6"></script>
 <script>
 var log = document.getElementById('log');
 function say(msg, cls) {
@@ -260,11 +260,11 @@ async function t10_history_memory() {
   await p.load({ url: 'test.pdf', headers: { 'X-T': '1' } });
   var img = { src: 'data:image/png;base64,' + new Array(4096).join('A'), name: '章', width: 10, height: 10 };
   p.addStamp({ x: 10, y: 20, page: 1, image: img });
-  var snap = p._history[p._historyIdx];
-  var shared = snap && snap[0] && snap[0].image === img;
+  var snap = p._history[p._historyIdx];   // { stamps, users }
+  var shared = snap && snap.stamps && snap.stamps[0] && snap.stamps[0].image === img;
   // 快照隔离性：改 _stamps 的标量不得影响历史
   p._stamps[0].x = 999;
-  var histX = p._history[p._historyIdx][0].x;
+  var histX = p._history[p._historyIdx].stamps[0].x;
   record('⑩ 历史快照共享 image 引用（内存不随图片放大）', shared, 'image 同引用=' + shared);
   record('⑩ 历史快照标量仍相互隔离', histX === 10, '历史 x=' + histX + '（改实例后仍应为 10）');
   p.destroy();

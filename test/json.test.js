@@ -185,3 +185,46 @@ const withImgOut = buildJSON({ docName: 'a', totalPages: 1, currentPage: 1, widt
 assert.deepStrictEqual(withImgOut.users[0].stamps[0].image, { src: 'data:image/png;base64,AAA', name: '章.png', width: 100, height: 100 }, 'includeImage:true 含图');
 
 console.log('=== v4 单测全部通过（.../按用户章图/含图导出） ===');
+
+/* ==================== v4.9.6: cMaps 目录候选推导（D7 根治） ====================
+ * 旧实现 `c.replace(/vendor\/pdf\.min\.js$/, 'cMaps/')` 只对以 vendor/pdf.min.js 结尾的候选生效；
+ * _localCandidates 还会产出 libs/pdf.min.js、../vendor/pdf.min.js 等 → replace 匹配不上就**原样返回**，
+ * 于是探测真的去 HEAD `libs/pdf.min.js78-EUC-H.bcmap`（必然 404）。
+ * 这里把"每个候选都必须是一个**有意义的目录**"钉死成断言。
+ */
+const { _cmapCandidates } = PdfStampPickerModule;
+
+// 布局A：库在 /libs/、页面在 /apps/contract/
+const cm1 = _cmapCandidates(_localCandidates('https://a.com/apps/contract/index.html', 'https://a.com/libs/pdf-stamp-picker.js'));
+assert.deepStrictEqual(cm1, [
+  'https://a.com/libs/vendor/cMaps/',
+  'https://a.com/apps/contract/vendor/cMaps/',
+  'https://a.com/apps/contract/../vendor/cMaps/',
+  'https://a.com/apps/contract/libs/cMaps/'
+]);
+// ★ 正确的那个必须排第一（探测是"首个 200 即停"，排在后面=白付前面的往返）
+assert.strictEqual(cm1[0], 'https://a.com/libs/vendor/cMaps/', '库自己 vendor/ 下的 cMaps 必须最先探');
+
+// ★ 核心断言（旧实现的病灶）：绝不能产出 "xxx.pdf.min.js78-EUC-H.bcmap" 这种拼接垃圾
+assert.ok(cm1.every(u => /\/cMaps\/$/.test(u)), '每个候选都必须以 /cMaps/ 结尾：' + cm1.join(', '));
+assert.ok(cm1.every(u => u.indexOf('.js') < 0), '候选里不允许残留 *.js（旧实现会把它当目录前缀）');
+
+// 纯函数：不依赖网络/DOM，含去重；候选与 _localCandidates 一一对应（同目录项合并）
+const cm2 = _cmapCandidates(_localCandidates('https://a.com/apps/index.html', 'https://a.com/apps/pdf-stamp-picker.js'));
+assert.deepStrictEqual(cm2, [
+  'https://a.com/apps/vendor/cMaps/',
+  'https://a.com/apps/../vendor/cMaps/',
+  'https://a.com/apps/libs/cMaps/'
+]);
+assert.strictEqual(cm2.length, _localCandidates('https://a.com/apps/index.html', 'https://a.com/apps/pdf-stamp-picker.js').length,
+  '每个 pdf.min.js 候选恰好对应一个 cMaps 目录候选（不多不少）');
+
+// query/hash 必须被剥掉（否则 HEAD 的 URL 带着 ?lang=zh）
+assert.strictEqual(_cmapCandidates(['https://a.com/x/vendor/pdf.min.js?v=4.9.6#a'])[0], 'https://a.com/x/vendor/cMaps/');
+
+// 边界：空输入 / 无斜杠 / 空项 → 返回空数组而不是抛错或产出垃圾
+assert.deepStrictEqual(_cmapCandidates([]), []);
+assert.deepStrictEqual(_cmapCandidates(null), []);
+assert.deepStrictEqual(_cmapCandidates(['pdf.min.js', '', null]), []);
+
+console.log('=== v4 单测全部通过（.../含图导出/cMaps 候选推导 D7） ===');

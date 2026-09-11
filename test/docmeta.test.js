@@ -26,24 +26,31 @@ let cases = 0;
 const ok = () => { cases++; };
 
 /** 最小实例：真实的文档元信息逻辑 + 其余字段手动给值 */
+/**
+ * 无 DOM 实例：**继承真实原型**，只桩掉 DOM/渲染/事件。
+ * ★ 不再手工列举"要复制的原型方法"——库新增内部方法（如 _snapshotState）时自动带上。
+ */
 function mkInst(seed) {
-  return Object.assign({
+  const p = Object.create(P.prototype);
+  Object.assign(p, {
     _docName: '', _totalPages: 0, _pageNumber: 1,
     _pdfW: 0, _pdfH: 0, _rotation: 0, _offsetX: 0, _offsetY: 0,
     _pdfHash: null, _pdfHashPromise: null, _pdfHashPending: null,
     _pdfBytes: null, _pdfBytesRef: null,
-    _stamps: [], _activeId: null, _sel: null, _users: null,
-    _history: [[]], _historyIdx: 0, _lastError: null, _loadStage: '',
-    // 真实逻辑（不抄一份规则）
-    _docMeta: P.prototype._docMeta,
-    _hashStatus: P.prototype._hashStatus,
-    _resetDocState: P.prototype._resetDocState,
-    _resetHistory: P.prototype._resetHistory,
-    getDocName: P.prototype.getDocName,
-    getTotalPages: P.prototype.getTotalPages,
-    toJSON: P.prototype.toJSON,
-    toFlatJSON: P.prototype.toFlatJSON
+    _stamps: [], _activeId: null, _sel: null,
+    _users: [{ id: 'u1', name: 'U1', color: '#4285f4' }], _currentUserId: 'u1',
+    _historyIdx: 0, _histGroupKey: null, _histMergedKey: null,
+    _options: { historyLimit: 50 },
+    _lastError: null, _loadStage: ''
   }, seed || {});
+  p._emit = function () {};
+  p._renderList = function () {};
+  p._paint = function () {};
+  p._rebuildUserSelect = function () {};
+  p._syncSelFromStamp = function () {};
+  p.getSelection = function () { return null; };
+  p._history = [p._snapshotState()];
+  return p;
 }
 
 /* 1. 未加载文档：'' / 0（0 而不是 1） */

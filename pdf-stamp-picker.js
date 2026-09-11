@@ -1,5 +1,5 @@
 /*!
- * PdfStampPicker v4.9.4
+ * PdfStampPicker v4.9.6
  * 纯 JavaScript PDF 电子签章坐标选择器 —— 单文件、零依赖、UMD 通用模块
  *
  * v2.0 新增：
@@ -15,7 +15,7 @@
  * 用法：
  *   // 容器模式
  *   const picker = new PdfStampPicker('#stage', { users: [...] });
- *   await picker.load('https://api.example.com/pdf/123', { headers: { Authorization: 'Bearer x' } });
+ *   await picker.load({ url: 'https://api.example.com/pdf/123', headers: { Authorization: 'Bearer x' } });
  *   const json = picker.toJSON();
  *
  *   // 弹窗模式
@@ -30,7 +30,7 @@
  *   - 旋转补偿公式（r 为页面顺时针旋转角度）：
  *       r=0:   x = cx/sx,          y = H - cy/sy
  *       r=90:  x = cy/sy,          y = cx/sx
- *       r=180: x = W - cx/sx,      y = H - cy/sy
+ *       r=180: x = W - cx/sx,      y = cy/sy
  *       r=270: x = W - cy/sy,      y = H - cx/sx
  */
 (function (global, factory) {
@@ -43,7 +43,7 @@
 })(this, function () {
   'use strict';
 
-  var VERSION = '4.9.5';
+  var VERSION = '4.9.6';
 
   // ★ 库文件加载时（同步 IIFE 执行期）记录自身位置——之后任何异步探测都能定位同目录 vendor/
   // 注意：document.currentScript 只在脚本同步执行期间有效，必须此时捕获
@@ -62,6 +62,17 @@
   var HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
   var DEFAULT_USERS = [{ id: 'default', name: '默认', color: '#4285f4' }];
   var STAMP_COLORS = ['#4285f4', '#ea4335', '#34a853', '#f9ab00', '#a142f4', '#12b5cb', '#e8710a', '#5f6368'];
+
+  /**
+   * error.stage 的**封闭集合**（v4.9.6 起）：_fail() 会把不在集合内的取值收敛为 'unknown'。
+   * 这样文档列出的取值就是完备的，且拼错 stage 不会静默产生「文档外取值」。
+   * 来源对照：_loadStage 赋值 prepare/read/hash/fetch/parse/ready/done；
+   *          显式传入 compat/type/source/timeout/import/load/stampimage；兜底 unknown。
+   */
+  var VALID_STAGES = [
+    'prepare', 'read', 'hash', 'fetch', 'parse', 'ready', 'done',
+    'compat', 'type', 'source', 'timeout', 'import', 'load', 'stampimage', 'unknown'
+  ];
 
   // ★ worker blob URL 全局缓存（跨实例共享）：worker 源码固定，fetch+Blob 只需做一次；
   //   blob URL 挂全局而非实例，避免实例 destroy 时 revoke 导致其他/后续实例的 workerSrc 悬空
@@ -326,21 +337,46 @@
 
   /**
    * @param {HTMLElement|string} container 容器元素或选择器
-   * @param {Object} [options]
-   * @param {'point'|'rect'} [options.mode='rect']
-   * @param {number|string} [options.zoom='fit-width']
-   * @param {number|null} [options.aspectRatio=null]
-   * @param {number} [options.minSize=4]
-   * @param {boolean} [options.showGrid=false]
+   * @param {Object} [options] 全部构造选项（**下表与源码内默认值逐项对应**，由 test/docs.test.js 机器对账）
+   * @param {'point'|'rect'|'stamp'} [options.mode='stamp'] 坐标选择模式。★ 默认值是 `'stamp'`——
+   *   v2.0 起画布点击就是"放公章"，**不是** `'rect'`（旧 JSDoc 与实际相反，照它写会以为默认在框选）
+   * @param {number|string} [options.zoom='fit-width'] 初始缩放：数字=倍率，或 'fit-width' / 'fit-page'
+   * @param {number|null} [options.aspectRatio=null] 锁定宽高比（null=自由）
+   * @param {number} [options.minSize=4] 框选最小边长(px)，小于此值视为点击
+   * @param {boolean} [options.showGrid=false] 显示对齐网格
    * @param {boolean} [options.controls=true] 显示工具栏/列表（默认开启）
+   * @param {Object|boolean|null} [options.toolbar=null] 工具栏按钮显隐配置（`null`=全部显示；
+   *   `false`=整条工具栏不显示；对象如 `{ undo: false }` 逐按钮开关）
    * @param {boolean} [options.showList=true] 显示签章列表面板
-   * @param {'light'|'dark'} [options.theme='dark']
-   * @param {number} [options.dpi=96]
-   * @param {Array<{id:string,name:string,color?:string}>} [options.users] 用户列表
-   * @param {string} [options.currentUser] 当前用户 id
+   * @param {'light'|'dark'} [options.theme='dark'] 主题
+   * @param {number} [options.dpi=96] 单位换算用 DPI（JSON 里 mm/inch/px 附属单位的基准）
+   * @param {Array<{id:string,name:string,color?:string}>|null} [options.users=null] 用户列表（null→内置示例用户）
+   * @param {string|null} [options.currentUser=null] 当前用户 id（null→首个用户）
    * @param {boolean} [options.allowMulti=true] 允许多签章
-   * @param {string} [options.pdfjsUrl] pdf.js 自动加载地址（默认 null：本地探测 vendor/ 优先，失败才 CDN）
-   * @param {object} [options.pdfjs] 已有 pdfjsLib 实例
+   * @param {boolean} [options.keepSelectionOnPageChange=false] 翻页时是否保留当前选区/选中态
+   *   （默认 false = 清空，保持历史行为）
+   * @param {Object|null} [options.stampImage=null] 默认公章图 `{src,name,width,height}`（null→按当前用户生成内置章）
+   * @param {number} [options.stampSize=120] 公章尺寸（**PDF pt**，v4.9.4 起；120pt ≈ 4.2cm ≈ 标准公章直径）
+   * @param {number} [options.stampMargin=12] 章距页面边界的最小间距(px)，0=不可超出边界
+   * @param {number} [options.minStampSize=24] **已废弃**（v4.4.3 起章固定大小，仅保留字段兼容）
+   * @param {number} [options.maxStampSize=480] **已废弃**（同上）
+   * @param {string|null} [options.pdfjsUrl=null] pdf.js 地址。默认 null：本地探测 vendor/ 优先（内网离线可用），全部失败才 CDN
+   * @param {Object|undefined} [options.pdfjs] 已有 pdfjsLib 实例（传入则完全跳过自动加载）
+   * @param {string|undefined} [options.cMapUrl] 中文 PDF 的 CMap 目录（显式指定 > 自动探测本地 cMaps/ > pdf.js 默认 CDN）
+   * @param {boolean} [options.compatCheck=false] 旧浏览器检测：true=检测到原生 API 缺失就提示升级+拒绝加载；
+   *   默认 false=自动兼容（polyfill 兜底、不提示），Edge 90 可直接用
+   * @param {boolean} [options.hashUrl=false] 纯 URL 流式加载时是否额外取一次字节算 `document.hash`
+   *   （默认 false 不额外下载；需要内网 URL 也出哈希时置 true）
+   * @param {number} [options.loadTimeout=0] 加载超时(ms)：0=不限。>0 时超时以 `stage:'timeout'` 的 error 结束
+   * @param {boolean} [options.keepBytes=false] 是否保留 PDF 字节。默认 false——pdf.js 会 transfer 走 buffer，
+   *   保留需额外拷贝一份；需要复用字节时才置 true
+   * @param {boolean} [options.clearStampsOnSetPage=true] 画布模式 `setPage()` 是否清空签章
+   *   （默认 true=保持历史行为；false=按页保留。v5.0 计划改默认值为 false）
+   * @param {number} [options.historyLimit=50] 撤销历史最大条数
+   * @param {'omit'|'same-origin'|'include'} [options.credentials='same-origin'] fetch 凭据模式
+   *   （跨域带 Cookie 的文件流接口需 `'include'`）
+   * @param {string|undefined} [options.cache] fetch cache 模式（透传，如 `'no-store'`）
+   * @param {string|undefined} [options.referrerPolicy] fetch referrerPolicy（透传）
    */
   function PdfStampPicker(container, options) {
     if (typeof document === 'undefined') throw new Error('[PdfStampPicker] 仅支持浏览器环境');
@@ -415,7 +451,7 @@
     this._drag = null;
     this._stamps = [];      // 全部签章点（PDF 坐标）
     this._activeId = null;  // 活动签章 id
-    this._history = [[]];      // 撤销栈（快照数组；仅浅拷贝标量，image 按引用共享）
+    this._history = [this._snapshotState()];   // 撤销栈（状态快照 {stamps, users}；仅浅拷贝标量，image 按引用共享）
     this._historyIdx = 0;   // 当前历史位置
     this._histGroupKey = null;   // 当前交互分组键（beginHistoryGroup 设置；结束事件清空）
     this._histMergedKey = null;  // 栈顶条目所属的合并键（用于判断能否覆盖栈顶）
@@ -733,11 +769,17 @@
     if (i >= 0) a.splice(i, 1);
     return this;
   };
+  /**
+   * 派发事件。**单个监听器抛错不影响其余监听器、也不冒泡给库的调用方**（隔离是有意的：
+   * 宿主自己的 bug 不该把库的加载/渲染流程带崩）。
+   *   ⚠️ 代价：宿主监听器里的异常会被静默吞掉 —— 调试时若怀疑"事件没到"，
+   *   请在监听器内部自行 try/catch 打日志，别指望这里有输出。
+   */
   PdfStampPicker.prototype._emit = function (type, payload) {
     var a = this._listeners[type];
     if (!a) return;
     for (var i = 0; i < a.length; i++) {
-      try { a[i](payload); } catch (e) { /* ignore */ }
+      try { a[i](payload); } catch (e) { /* ignore：见上方注释（有意隔离） */ }
     }
   };
 
@@ -748,9 +790,16 @@
    *   File | ArrayBuffer | Uint8Array | string(远程静态 URL) |
    *   { url, method?, headers?, body? }(PDF 文件流接口) | pdfjs document proxy
    * @param {*} source
-   * @param {Object} [opts] { pageNumber, mode }
+   * @param {Object} [opts] { pageNumber, mode, headers, method, body, credentials, cache, referrerPolicy, signal }
    * @param {number} [opts.pageNumber] 加载后跳转的页码
    * @param {'point'|'rect'|'stamp'} [opts.mode] 加载后切换的坐标选择模式（可选性加载）
+   * @param {Object} [opts.headers] 请求头（string 与 {url} 两种形式均生效，如 { Authorization: 'Bearer x' }）
+   * @param {string} [opts.method] 请求方法（默认 GET）
+   * @param {*} [opts.body] 请求体
+   * @param {'omit'|'same-origin'|'include'} [opts.credentials] fetch 凭据模式（覆盖构造选项）
+   * @param {string} [opts.cache] fetch 缓存模式（覆盖构造选项）
+   * @param {string} [opts.referrerPolicy] fetch referrer 策略（覆盖构造选项）
+   * @param {AbortSignal} [opts.signal] 外部中止信号（覆盖内部 AbortController）
    */
   PdfStampPicker.prototype.load = function (source, opts) {
     var self = this;
@@ -803,7 +852,17 @@
     } else if (typeof source === 'string') {
       this._sourceKind = 'url-stream';
       urlForHash = source;
-      p = this._loadRemote({ url: source, signal: this._abortSignal, token: token });
+      // ★ 根治：字符串形式同样接受 opts 里的网络参数（headers/method/body/credentials/cache/referrerPolicy）。
+      //   否则 load(url, { headers }) 会【静默丢弃鉴权头】—— 受保护接口 401，而报错是 pdf.js 的
+      //   UnknownErrorException: Failed to fetch，几乎无法定位（v4.9.6 修）。
+      var sOpts = { url: source, signal: this._abortSignal, token: token };
+      if (opts.headers) { sOpts.headers = opts.headers; headersForHash = opts.headers; }
+      if (opts.method) sOpts.method = opts.method;
+      if (opts.body) sOpts.body = opts.body;
+      if (opts.credentials !== undefined) sOpts.credentials = opts.credentials;
+      if (opts.cache !== undefined) sOpts.cache = opts.cache;
+      if (opts.referrerPolicy !== undefined) sOpts.referrerPolicy = opts.referrerPolicy;
+      p = this._loadRemote(sOpts);
     } else if (source && typeof source === 'object' && typeof source.url === 'string' && !(source instanceof ArrayBuffer)) {
       this._sourceKind = 'url';
       urlForHash = source.url;
@@ -1121,7 +1180,13 @@
    */
   PdfStampPicker.prototype._fail = function (err, stage) {
     var e = (err instanceof Error) ? err : new Error(String(err));
+    // ★ 根治 D4（幂等）：同一次失败可能被多层 catch 重复上报（如 load() → _loadUrl()）。
+    //   同一个 error 对象只派发一次，宿主不会收到形状不一致的重复 error 事件。
+    if (e.__pspReported) return e;
+    try { e.__pspReported = true; } catch (_) { /* 冻结对象等极端情况忽略 */ }
     if (!e.stage) e.stage = stage || 'unknown';
+    // ★ stage 收敛到封闭集合：拼错/新增的 stage 一律归为 'unknown'，保证文档列出的取值是完备的
+    if (VALID_STAGES.indexOf(e.stage) === -1) e.stage = 'unknown';
     this._lastError = { message: e.message, stage: e.stage, at: Date.now() };
     this._emit('error', { error: e, message: e.message, stage: e.stage });
     return e;
@@ -1267,15 +1332,10 @@
     }
     // ★ 用库位置（_libSrc）作探测基址，与 pdf.min.js 探测一致（异步时 currentScript 失效）
     var scriptSrc = this._libSrc || (document.currentScript && document.currentScript.src) || null;
-    var cands = PdfStampPicker._localCandidates(window.location.href, scriptSrc);
-    var raw = [];
-    cands.forEach(function (c) {
-      raw.push(c.replace(/vendor\/pdf\.min\.js$/, 'cMaps/'));
-      raw.push(c.replace(/vendor\/pdf\.min\.js$/, 'vendor/cMaps/'));
-    });
-    // 候选去重（历史链里存在重复项，重复 HEAD 纯属浪费）
-    var seen = {}, uniq = [];
-    raw.forEach(function (u) { if (!seen[u]) { seen[u] = 1; uniq.push(u); } });
+    // ★ D7：候选推导收口到纯函数（自带去重），不再产出 `libs/pdf.min.js78-EUC-H.bcmap` 这类
+    //   无意义 URL —— 详见 PdfStampPicker._cmapCandidates 的说明
+    var uniq = PdfStampPicker._cmapCandidates(
+      PdfStampPicker._localCandidates(window.location.href, scriptSrc));
     var idx = 0;
     var probe = function () {
       if (idx >= uniq.length) return Promise.resolve(null);
@@ -1500,6 +1560,33 @@
     var seen = {}, uniq = [];
     out.forEach(function (p) { if (!seen[p]) { seen[p] = 1; uniq.push(p); } });
     return uniq;
+  };
+
+  /**
+   * 由 pdf.js 候选路径推出 cMaps 目录候选（纯函数，可单测）。
+   *
+   * ★ D7 根治（v4.9.6）：cMaps 一定与**探测到的那个 pdf.min.js 同目录**。
+   *   旧实现是 `c.replace(/vendor\/pdf\.min\.js$/, 'cMaps/')`，只对以 `vendor/pdf.min.js`
+   *   结尾的候选生效；而 _localCandidates 还会产出 `libs/pdf.min.js`、`../vendor/pdf.min.js` 等，
+   *   正则匹配不上时 replace **原样返回** —— 于是探测真的去 HEAD
+   *   `libs/pdf.min.js78-EUC-H.bcmap`（必然 404），既白付一次网络往返，
+   *   又把"到底想探哪个目录"这件事从代码里抹掉了（读代码根本看不出意图）。
+   *   抽成纯函数后：①Node 侧可直接断言候选集 ②库内探测与单测共用同一份推导。
+   *
+   * @param {string[]} cands _localCandidates 的输出
+   * @returns {string[]} 去重后的 cMaps 目录候选（均以 '/' 结尾）
+   */
+  PdfStampPicker._cmapCandidates = function (cands) {
+    var out = [], seen = {};
+    (cands || []).forEach(function (c) {
+      if (!c) return;
+      var p = String(c).split('#')[0].split('?')[0];
+      var slash = p.lastIndexOf('/');
+      if (slash < 0) return;
+      var dir = p.slice(0, slash + 1) + 'cMaps/';
+      if (!seen[dir]) { seen[dir] = 1; out.push(dir); }
+    });
+    return out;
   };
 
   /**
@@ -1815,6 +1902,11 @@
       this._ensureStampImage().then(function () {
         if (self._destroyed || token !== self._userToken) return;
         self._paint();
+      }).catch(function (err) {
+        // ★ 根治 D2：缺 catch 会让章图加载失败变成 unhandledrejection ——
+        //   error 事件不发、_lastError 为空，宿主完全无感知（违反"所有失败必须流经 _fail"的库自述）。
+        if (self._destroyed || token !== self._userToken) return;
+        self._fail(err, 'stampimage');
       });
     }
     return this;
@@ -1843,6 +1935,10 @@
     this._ensureStampImage().then(function () {
       if (self._destroyed || token !== self._userToken) return;
       self._paint();
+    }).catch(function (err) {
+      // ★ 根治 D2：与 setMode 同理，缺 catch → unhandledrejection + 静默失败
+      if (self._destroyed || token !== self._userToken) return;
+      self._fail(err, 'stampimage');
     });
     return this;
   };
@@ -1855,6 +1951,9 @@
     var u = { id: user.id, name: user.name, color: user.color || STAMP_COLORS[this._users.length % STAMP_COLORS.length] };
     this._users.push(u);
     this._rebuildUserSelect();
+    // ★ 用户列表属于文档状态的一部分（toJSON 会导出 users），改动必须入栈，
+    //   否则撤销时用户列表与签章列表不自洽 → 孤儿签章。
+    this._pushHistory();
     return this;
   };
 
@@ -1877,6 +1976,10 @@
     this._rebuildUserSelect();
     this._renderList();
     this._paint();
+    // ★ 根治 D1：删除用户会同时改 _users 与 _stamps，必须入栈。
+    //   旧实现漏了这一步，导致 undo() 从旧快照恢复出"已被删用户的签章"，
+    //   而用户列表里没有该用户 → 孤儿签章 → toFlatJSON/toJSON 结果不一致（静默丢数据）。
+    this._pushHistory();
     return this;
   };
 
@@ -2250,6 +2353,7 @@
 
     var firstPage = 0;
     var batchCount = 0;
+    var addedStamps = [];                     // ★ D5：收集本批新增的签章对象，用于逐个派发 stampadd
     var skipped = parsed.ignored || 0;        // H4：坏条目计数（不再静默丢弃）
     var failure = null;
     var savedUserId = this._currentUserId;    // 记录导入前用户，结束后还原
@@ -2266,7 +2370,7 @@
         if (self._currentUserId !== targetUserId) self._currentUserId = targetUserId;  // 临时切换（仅内部）
         await self._ensureStampImage();
       }
-      self.addStamp({
+      var made = self.addStamp({
         x: st.x, y: st.y,
         width: st.width, height: st.height,
         page: st.page || self._pageNumber,
@@ -2275,6 +2379,7 @@
         image: st.image || null,
         _batch: true   // 批量模式：跳过中间渲染/历史/事件
       });
+      if (made) addedStamps.push(made);
       batchCount++;
       if (st.page && (!firstPage || st.page < firstPage)) firstPage = st.page;
     }
@@ -2284,17 +2389,20 @@
       this._currentUserId = savedUserId;    // ★ 无论如何都还原（不改变外部状态）
     }
 
-    // 批量收尾：一次历史 + 一次渲染 + 批量事件（性能优化）
+    // 批量收尾：一次历史 + 一次渲染 + 逐个派发 stampadd
     if (batchCount) {
       this._pushHistory();
       this._renderList();
-      this._emit('stampadd', { batch: batchCount });
+      // ★ 根治 D5：逐个派发 stampadd（payload = 签章对象），与程序化 addStamp 路径形状一致。
+      //   旧实现只发一个 {batch:N} 的一次性事件，宿主按文档读 stamp.id 得到 undefined，
+      //   导入路径下宿主的增量副本根本无法建立。
+      for (var ei = 0; ei < addedStamps.length; ei++) this._emit('stampadd', addedStamps[ei]);
     }
 
     // 合并历史：整体导入作为一步撤销
     if (this._historyIdx > baseIdx) {
       this._history = this._history.slice(0, baseIdx + 1);
-      this._history.push(snapshotStamps(this._stamps));
+      this._history.push(this._snapshotState());
       this._historyIdx = this._history.length - 1;
     }
 
@@ -2593,7 +2701,7 @@
    *   任何一处漏改都会留下"分组键指向已废弃历史"的悬空状态 —— 统一入口是根治。
    */
   PdfStampPicker.prototype._resetHistory = function () {
-    this._history = [[]];
+    this._history = [this._snapshotState()];
     this._historyIdx = 0;
     this._histGroupKey = null;
     this._histMergedKey = null;
@@ -2606,11 +2714,25 @@
    *        本次【覆盖栈顶快照】而不是新增一条（即"同一次交互只留最终结果"）。
    *        省略时取当前分组键（beginHistoryGroup 设置的）。
    */
+  /**
+   * 历史状态快照：**同时**覆盖签章与用户列表。
+   * ★ 根治 D1：旧实现只快照 _stamps，而 removeUser() 会同时改 _users 与 _stamps，
+   *   于是快照无法表达"用户被删"这件事 —— 撤销后签章复活、用户却回不来，
+   *   产生 userId 指向不存在的用户的【孤儿签章】：toFlatJSON 保留它、toJSON 分组丢弃它，
+   *   同一状态两个导出器给出不同结果（静默丢数据）。
+   */
+  PdfStampPicker.prototype._snapshotState = function () {
+    return {
+      stamps: snapshotStamps(this._stamps),
+      users: snapshotUsers(this._users)
+    };
+  };
+
   PdfStampPicker.prototype._pushHistory = function (mergeKey) {
-    // ★ 用 snapshotStamps 而非 JSON.stringify：后者会把每个签章点的 base64 章图
+    // ★ 用 snapshot 而非 JSON.stringify：后者会把每个签章点的 base64 章图
     //   完整复制进每一条历史（上限 50 条），带图签章多时内存成倍放大。
     //   快照只浅拷贝标量，image 对象按引用共享（库内 image 只读，安全）。
-    var snapshot = snapshotStamps(this._stamps);
+    var snapshot = this._snapshotState();
     var key = mergeKey || this._histGroupKey || null;
     // 若当前不在栈顶（已 undo 过），丢弃 redo 分支
     if (this._historyIdx < this._history.length - 1) {
@@ -2651,11 +2773,65 @@
   };
 
   PdfStampPicker.prototype._restoreFromHistory = function () {
-    try {
-      // ★ 从快照再复制一层：历史里的对象必须保持只读，不能被 _stamps 后续修改污染
-      var snap = this._history[this._historyIdx];
-      this._stamps = snap ? snapshotStamps(snap) : [];
-    } catch (e) { return; }
+    var before = this._stamps;
+    /* 注意：这里**故意不包 try/catch**。v4.9.6 开发期曾在外面套一层 `catch (e) { return; }`，
+       结果把下面这行 `this._currentUserId`（普通回调里用 this，未传 thisArg，
+       严格模式下 this===undefined）抛的 TypeError **吞掉**了：
+       签章已被替换、用户没还原、事件没派发，`undo()` 静默半途而废 ——
+       状态被改了一半却没有任何报错，是比直接抛错恶劣得多的失败形态。
+       这类"回调里用 this"在本库已出现两次（另一次是 v4.8.26 的 gotoPage._pageToken），
+       因此现在由 test/docs.test.js 第 11 节静态扫描全库，不再依赖人眼。 */
+    // 从快照再复制一层：历史里的对象必须保持只读，不能被 _stamps 后续修改污染
+    var snap = this._history[this._historyIdx];
+    // 新格式 {stamps, users}；旧格式（纯签章数组）仍兼容读取
+    var snapStamps = (snap && !Array.isArray(snap) && Array.isArray(snap.stamps))
+      ? snap.stamps : (Array.isArray(snap) ? snap : []);
+    var snapUsers = (snap && !Array.isArray(snap) && Array.isArray(snap.users)) ? snap.users : null;
+    this._stamps = snapshotStamps(snapStamps);
+    if (snapUsers) {
+      this._users = snapshotUsers(snapUsers);
+      // 当前用户被撤没了 → 落到第一个用户（用局部变量，别在回调里写 this）
+      var curId = this._currentUserId;
+      var stillThere = this._users.some(function (u) { return u.id === curId; });
+      if (this._users.length && !stillThere) {
+        this._currentUserId = this._users[0].id;
+      }
+      this._rebuildUserSelect();
+    }
+
+    // ★ 不变量：签章必须引用已存在的用户（userId 为空视为"未指派"，保留）。
+    //   撤销可能把用户列表还原成不含某用户的版本，此时该用户的签章必须一并丢弃 ——
+    //   否则产生【孤儿签章】：toFlatJSON 保留它、toJSON 分组丢弃它，
+    //   同一状态两个导出器给出不同结果（静默丢数据）。
+    this._stamps = this._stamps.filter(function (st) {
+      if (!st || !st.userId) return true;
+      return this._users.some(function (u) { return u.id === st.userId; });
+    }, this);
+
+    // ★ 派发【增量事件】（D6 根治）：宿主靠 stampadd/stampremove/stampchange 维护本地副本，
+    //   旧实现撤销时只发一个 stampchange(null)，宿主的本地副本会与库状态静默漂移。
+    var self = this;
+    var beforeById = {};
+    for (var bi = 0; bi < before.length; bi++) {
+      if (before[bi] && before[bi].id) beforeById[before[bi].id] = before[bi];
+    }
+    var afterById = {};
+    for (var ai = 0; ai < this._stamps.length; ai++) {
+      if (this._stamps[ai] && this._stamps[ai].id) afterById[this._stamps[ai].id] = this._stamps[ai];
+    }
+    for (var ri = 0; ri < before.length; ri++) {
+      var bs = before[ri];
+      if (bs && bs.id && !afterById[bs.id]) this._emit('stampremove', bs);
+    }
+    var geoKey = null;   // 见下方 sameStamp：不再用"手写字段清单"做比较
+    for (var ni = 0; ni < this._stamps.length; ni++) {
+      var as = this._stamps[ni];
+      if (!as || !as.id) continue;
+      var prev = beforeById[as.id];
+      if (!prev) this._emit('stampadd', as);
+      else if (!sameStamp(prev, as)) this._emit('stampchange', as);
+    }
+
     // 恢复后：活动签章若不存在则清空；存在则同步屏幕选区（防止活动章绘制位置错乱）
     if (this._activeId && !this._stamps.some(function (st) { return st.id === this._activeId; }, this)) {
       this._activeId = null;
@@ -2670,7 +2846,6 @@
     this._renderList();
     this._paint();
     this._emit('change', this.getSelection());
-    this._emit('stampchange', null);
   };
 
   /** 轻量同步列表选中态（不重建 DOM，避免破坏双击编辑备注） */
@@ -3515,7 +3690,9 @@
     }).catch(function (err) {
       self._setLoading(false);
       self._toast('❌ 加载失败：' + (err.message || err));
-      self._emit('error', { message: err.message });
+      // ★ 根治 D4：这里**不再**重复派发 error —— load() 内部已通过 _fail() 派发过一次
+      //   （带 stage/error 字段）。旧实现在此再发一次「只有 message」的 error，
+      //   一次失败派发两个形状不同的 error 事件，宿主按文档读 stage 时第二次拿到 undefined。
       if (typeof console !== 'undefined') console.error(err);
     });
   };
@@ -3652,6 +3829,82 @@
     this._listEl = null;
   };
 
+  /* ============ destroy 之后的"空操作"守卫（M3 根治，v4.9.6） ============
+   * 对外承诺（INTEGRATION.md 第 12 章）：destroy() 之后**所有公开方法均为空操作**。
+   * 旧实现只在 8 处写了 `_destroyed` 检查，于是 setPage / setZoom / fitWidth /
+   * exportImage / setCurrentUser 在销毁后直接抛 TypeError（去读已被置 null 的
+   * _pdf / _canvas / _root）。宿主的典型形态是"组件卸载时 destroy()，但定时器、
+   * 异步回调、第三方库仍可能再碰一次实例"—— 一次 TypeError 就足以让宿主页面白屏，
+   * 而库这边看起来"已经清理干净了"，失败点又不在库的调用栈里，极难定位。
+   *
+   * 根治方式：**声明式归类 + 统一包裹**，而不是逐个方法手写 `if`。
+   *   漏写一个方法 = 漏一个 TypeError，靠人记是记不住的（旧实现就欠了 5 个）。
+   *   因此这里给 46 个公开方法逐一归类，并且：
+   *     · 加载期自检：表里登记了不存在的方法 → 立刻抛错；
+   *     · test/destroy.test.js：**原型上的每个公开方法都必须在表里有归类**，
+   *       同时表里每一项也都必须指向真实方法（双向对账）。
+   *   将来新增公开方法却忘了归类，会在单测里当场报错，而不是等宿主踩到。
+   *
+   * 返回值语义（销毁后）：
+   *   'this'          → 返回实例本身（与非销毁时的链式写法一致，宿主 `p.setZoom(2).fitWidth()` 不炸）
+   *   'promise-void'  → Promise.resolve()（异步方法：**resolve 而不 reject**，
+   *                     卸载流程里的调用不该产生未处理拒绝）
+   *   'promise-null'  → Promise.resolve(null)（没有可导出的东西）
+   *   'keep'          → 不包裹（见下方理由）
+   */
+  var DESTROY_SAFE = {
+    /* —— 变更 / 渲染类：销毁后空操作，返回实例（保持链式） —— */
+    load: 'this', loadPDF: 'this', abort: 'this',
+    setPage: 'this', gotoPage: 'this', setZoom: 'this', fitWidth: 'this', fitPage: 'this',
+    setMode: 'this', setAspectRatio: 'this', setShowGrid: 'this', setCurrentUser: 'this',
+    addUser: 'this', removeUser: 'this', toggleList: 'this', setStampImage: 'this',
+    addStamp: 'this', removeStamp: 'this', removeSelection: 'this', clear: 'this', clearAll: 'this',
+    beginHistoryGroup: 'this', endHistoryGroup: 'this', undo: 'this', redo: 'this',
+    selectStamp: 'this', on: 'this', off: 'this',
+    /* —— 异步方法：空操作也要保持"返回 Promise"的形状，且绝不 reject —— */
+    importJSON: 'promise-void',   // 正常路径也 resolve(undefined)
+    exportImage: 'promise-null',  // 画布已释放；宿主在卸载流程里调它不该收到未处理拒绝
+    /* —— 豁免：不包裹（销毁后本来就安全【且返回值语义仍然成立】）——
+     *   这类方法只读状态/做纯计算，把它们也变成"空操作"反而更糟：
+     *   例如 getStamps() 会从"返回空数组"退化成"返回 undefined"，宿主一遍历就崩。
+     *   逐项理由（不是漏了）：
+     *     destroy        幂等自身（_destroyed 已保证），必须仍可调用
+     *     getDocName     → ''      getTotalPages → 0（纯字段读，见其 JSDoc 的归零约定）
+     *     getHash        → Promise.resolve(null)（不触碰 DOM）
+     *     getZoom/getCurrentUser/getStampImage/getSelection/getActiveStamp → 纯字段读
+     *     getStamps      → []（_stamps 已被 destroy 清空）  getStampsByUser → 基于 getStamps
+     *     toJSON/toFlatJSON → 合法空文档结构（_docMeta 只读字段）
+     *     screenToPdf/pdfToScreen → 纯几何换算（_geom 只读数字字段，不触碰 DOM）
+     *     copyJSON       → toJSON() + Clipboard API + _toast()（都不依赖已释放的 _root/_canvas）
+     */
+    destroy: 'keep',
+    getDocName: 'keep', getTotalPages: 'keep', getHash: 'keep', getZoom: 'keep',
+    getCurrentUser: 'keep', getStampImage: 'keep', getSelection: 'keep', getActiveStamp: 'keep',
+    getStamps: 'keep', getStampsByUser: 'keep', toJSON: 'keep', toFlatJSON: 'keep',
+    screenToPdf: 'keep', pdfToScreen: 'keep', copyJSON: 'keep'
+  };
+
+  (function installDestroyGuards() {
+    var proto = PdfStampPicker.prototype;
+    Object.keys(DESTROY_SAFE).forEach(function (name) {
+      var kind = DESTROY_SAFE[name];
+      var fn = proto[name];
+      if (typeof fn !== 'function') {
+        throw new Error('[PdfStampPicker] destroy 守卫表登记了不存在的方法：' + name);
+      }
+      if (kind === 'keep') return;
+      proto[name] = function () {
+        if (this._destroyed) {
+          if (kind === 'this') return this;
+          if (kind === 'promise-void') return Promise.resolve();
+          if (kind === 'promise-null') return Promise.resolve(null);
+          return undefined;
+        }
+        return fn.apply(this, arguments);
+      };
+    });
+  })();
+
   /* ====================== 弹窗模式 ====================== */
 
   /**
@@ -3715,17 +3968,19 @@
       document.body.appendChild(mask);
 
       var settled = false;
-      var pickerOpts = Object.assign({}, config.pickerOptions, {
-        users: config.users,
-        currentUser: config.currentUser
-      });
-      // 传了 json 但没传 users → 用 json 里的签署方初始化（避免多余默认用户）
-      if ((!config.users || !config.users.length) && config.json && Array.isArray(config.json.users)) {
+      // ★ 根治 D3：只有【显式传入】才覆盖 pickerOptions 里的同名项。
+      //   旧实现无条件写入 users/currentUser（连 undefined 也写），会静默抹掉
+      //   pickerOptions.users —— 而 README 承诺 pickerOptions 可透传「所有构造选项」。
+      //   此处与下面 mode 的写法（先判 undefined）保持一致。
+      var pickerOpts = Object.assign({}, config.pickerOptions);
+      if (config.users !== undefined) pickerOpts.users = config.users;
+      if (config.currentUser !== undefined) pickerOpts.currentUser = config.currentUser;
+      // 顶层与 pickerOptions 都没给 users（或给了空数组）→ 用 json 里的签署方初始化（避免多余默认用户）
+      if ((!pickerOpts.users || !pickerOpts.users.length) && config.json && Array.isArray(config.json.users)) {
         pickerOpts.users = config.json.users.map(function (g) { return g.user; });
       }
-      // 顶层 mode 优先，其次 pickerOptions.mode，都不传则用构造默认（stamp）
+      // 顶层 mode 优先；否则沿用 pickerOptions.mode（已随上面 assign 带入）；都不传则用构造默认（stamp）
       if (config.mode !== undefined) pickerOpts.mode = config.mode;
-      else if (config.pickerOptions && config.pickerOptions.mode !== undefined) pickerOpts.mode = config.pickerOptions.mode;
       var picker = new PdfStampPicker(body, pickerOpts);
       // PDF 加载 → （可选）回显已有签章点 JSON → 完成
       var loadPromise = config.source
@@ -3831,6 +4086,56 @@
       var c = {};
       for (var k in s) {
         if (Object.prototype.hasOwnProperty.call(s, k)) c[k] = s[k];
+      }
+      out.push(c);
+    }
+    return out;
+  }
+
+  /**
+   * 判断两个签章对象是否"可观察地相同"（撤销/重做时决定要不要发 stampchange）。
+   *
+   * ★ 为什么不写成"手写字段清单"：v4.9.6 初版就是
+   *     `[s.x, s.y, s.w, s.h, ...].join('|')` —— 而签章对象的字段实际是
+   *     **width/height**，`s.w`/`s.h` 恒为 undefined → 改完尺寸再撤销，
+   *     两侧 key 都是 'undefined' → **不发 stampchange**，宿主的增量副本静默停留在旧尺寸
+   *     ——恰好就是 D6 要根治的那类"静默漂移"，只是换了个入口。
+   *   教训：比较"对象是否变化"时，字段清单本身就是最容易错、最难发现的一环。
+   *   这里改成**取两侧字段并集**逐一比较（对称、不依赖字段清单）：
+   *     · 新增签章字段 → 自动纳入比较，不需要改这里；
+   *     · 快照与实时对象字段集不同（例如某侧多了 undefined 的键）→ 不会被误判为"变化"。
+   *   `image` 只比 src：dataURL 动辄上百 KB，比字符串本身既慢又没必要。
+   */
+  function sameStamp(a, b) {
+    if (!a || !b) return a === b;
+    var keys = {}, k;
+    for (k in a) if (Object.prototype.hasOwnProperty.call(a, k)) keys[k] = 1;
+    for (k in b) if (Object.prototype.hasOwnProperty.call(b, k)) keys[k] = 1;
+    for (k in keys) {
+      if (k === 'image') {
+        if (((a.image && a.image.src) || null) !== ((b.image && b.image.src) || null)) return false;
+        continue;
+      }
+      var va = a[k], vb = b[k];
+      if (va === vb) continue;
+      // NaN 容错：NaN !== NaN 恒真，若不特判，任何一侧出现 NaN 字段（例如异常坐标）
+      // 都会让**每一次**撤销都对这个签章发一次 stampchange —— 宿主收到无意义的事件风暴。
+      if (va !== va && vb !== vb) continue;
+      return false;
+    }
+    return true;
+  }
+
+  /** 用户列表快照：与 snapshotStamps 同规则（浅拷贝标量，保持隔离） */
+  function snapshotUsers(users) {
+    var out = [];
+    if (!users) return out;
+    for (var i = 0; i < users.length; i++) {
+      var u = users[i];
+      if (!u || typeof u !== 'object') { out.push(u); continue; }
+      var c = {};
+      for (var k in u) {
+        if (Object.prototype.hasOwnProperty.call(u, k)) c[k] = u[k];
       }
       out.push(c);
     }
@@ -4328,9 +4633,17 @@
     return { stamps: stamps, users: users, ignored: ignored };
   }
 
+  /** destroy 守卫归类表（原型方法 ↔ 'this' / 'promise-void' / 'promise-null' / 'keep'）。
+   *  暴露给测试做**双向对账**：原型上每个公开方法都必须有归类，且表里每项都必须指向真实方法 ——
+   *  见 test/destroy.test.js。没有它，"所有公开方法都登记了吗"就只能靠人眼数。 */
+  PdfStampPicker._destroySafe = DESTROY_SAFE;
+
   PdfStampPicker._internals = { buildJSON: buildJSON, buildFlatJSON: buildFlatJSON, parseImportJSON: parseImportJSON, genId: genId, normalizeRotation: normalizeRotation,
     // 坐标换算纯函数（单一真源）：库内部与单元测试共用同一份实现
-    makeGeom: makeGeom, pdfCoordFromScreen: pdfCoordFromScreen, screenCoordFromPdf: screenCoordFromPdf };
+    makeGeom: makeGeom, pdfCoordFromScreen: pdfCoordFromScreen, screenCoordFromPdf: screenCoordFromPdf,
+    // 快照比较（撤销事件是否派发的判据）：暴露出来是为了让单测能钉死
+    // "改尺寸必须算变化"（v4.9.6 初版用 s.w/s.h 恒 undefined 漏判过）
+    sameStamp: sameStamp };
   PdfStampPicker._localCandidates = PdfStampPicker._localCandidates || null; // 由下方赋值（保持单测可访问）
 
   return PdfStampPicker;

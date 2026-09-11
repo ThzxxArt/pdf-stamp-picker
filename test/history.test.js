@@ -19,30 +19,43 @@ const Picker = require(path.join(__dirname, '..', 'pdf-stamp-picker.js'));
 
 let cases = 0;
 
-/** 构造一个"无 DOM 实例"：历史相关的真实原型方法 + 最小状态 */
+/**
+ * 构造一个"无 DOM 实例"：**继承真实原型**，只把 DOM/渲染/事件相关方法桩掉。
+ * ★ 不再手工列举"要复制的原型方法"—— 库新增内部方法（如 _snapshotState）时，
+ *   Object.create(Picker.prototype) 会自动带上，避免替身与库脱节后报一堆无信息的 TypeError。
+ */
 function mkInst(limit) {
-  const inst = {
-    _stamps: [],
-    _activeId: null,
-    _sel: null,
-    _options: { historyLimit: limit || 50 },
-    _history: [[]],
-    _historyIdx: 0,
-    _histGroupKey: null,
-    _histMergedKey: null,
-    _pushHistory: Picker.prototype._pushHistory,
-    beginHistoryGroup: Picker.prototype.beginHistoryGroup,
-    endHistoryGroup: Picker.prototype.endHistoryGroup,
-    _resetHistory: Picker.prototype._resetHistory,
-    undo: Picker.prototype.undo,
-    redo: Picker.prototype.redo,
-    // 真实恢复逻辑依赖 DOM/画布，这里只保留"从快照取回"的语义
-    _restoreFromHistory: function () {
-      const snap = this._history[this._historyIdx] || [];
-      this._stamps = snap.map(s => Object.assign({}, s));
-    }
-  };
+  const inst = Object.create(Picker.prototype);
+  inst._stamps = [];
+  inst._activeId = null;
+  inst._sel = null;
+  inst._users = [{ id: 'u1', name: 'U1', color: '#4285f4' }];
+  inst._currentUserId = 'u1';
+  inst._options = { historyLimit: limit || 50, stampSize: 120 };   // stampSize：addStamp 缺省尺寸的真源（D14 起是 PDF pt）
+  inst._historyIdx = 0;
+  inst._histGroupKey = null;
+  inst._histMergedKey = null;
+  // 只桩掉 DOM/渲染/事件：历史与恢复逻辑全部走【真实实现】
+  inst._emit = function () {};
+  inst._renderList = function () {};
+  inst._paint = function () {};
+  inst._rebuildUserSelect = function () {};
+  inst._syncSelFromStamp = function () {};
+  inst.getSelection = function () { return null; };
+  inst._resetHistory();
   return inst;
+}
+
+/* 0. 替身自检：确认拿到的是真实原型（过期/脱节会立刻指名报错，而不是运行到一半崩） */
+{
+  const probe = mkInst(50);
+  assert.strictEqual(Object.getPrototypeOf(probe), Picker.prototype,
+    '替身必须继承真实原型');
+  ['_pushHistory', '_snapshotState', '_restoreFromHistory', '_resetHistory',
+    'undo', 'redo', 'beginHistoryGroup', 'endHistoryGroup'].forEach(function (n) {
+      assert.strictEqual(typeof Picker.prototype[n], 'function', '库原型缺少 ' + n);
+    });
+  cases += 2;
 }
 
 /** 模拟一次"变更"：改状态 + 记录历史（参数即当前状态的可读标记） */
@@ -184,10 +197,95 @@ function change(inst, x, mergeKey) {
   const inst = mkInst(50);
   change(inst, 1);
   inst._stamps[0].x = 999;                          // 直接改当前状态
-  assert.strictEqual(inst._history[1][0].x, 1, '历史快照必须与后续修改隔离');
+  assert.strictEqual(inst._history[1].stamps[0].x, 1, '历史快照必须与后续修改隔离');
   cases += 1;
 }
 
+/* 11. 撤销/重做的【增量事件】（D6 根治）
+   旧实现：undo/redo 只发一个 stampchange(null)，payload 为 null 且不区分发生了什么 →
+   宿主靠 stampadd/stampremove/stampchange 维护的本地副本会与库状态**静默漂移**
+   （宿主既不 trim 也拿不到对象，只能整表重拉）。
+   这里断言事件形状与 payload 都是可用的增量信息。 */
+{
+  const inst = mkInst(50);
+  inst._users = [{ id: 'u1', name: 'U1' }, { id: 'u2', name: 'U2' }];
+  inst._currentUserId = 'u1';
+  const events = [];
+  inst._emit = function (name, payload) { events.push({ name: name, payload: payload }); };
+  const only = function (n) { return events.filter(function (e) { return e.name === n; }); };
+
+  const s1 = inst.addStamp({ x: 10, y: 10, userId: 'u1' });
+  const s2 = inst.addStamp({ x: 50, y: 50, userId: 'u2' });
+
+  events.length = 0;
+  inst.undo();
+  assert.strictEqual(inst._stamps.length, 1, '撤销后回到 1 枚签章');
+  assert.strictEqual(only('stampremove').length, 1, '撤销必须发 stampremove');
+  assert.ok(only('stampremove')[0].payload && only('stampremove')[0].payload.id === s2.id,
+    'stampremove payload 是被移除的签章对象本身（含 id），不是 null');
+  assert.strictEqual(only('change').length, 1, '撤销后统一补一次 change');
+
+  events.length = 0;
+  inst.redo();
+  assert.strictEqual(only('stampadd').length, 1, '重做必须发 stampadd');
+  assert.ok(only('stampadd')[0].payload && only('stampadd')[0].payload.id === s2.id,
+    'stampadd payload 是新增的签章对象本身');
+  assert.strictEqual(only('stampremove').length, 0, '重做不该发 stampremove');
+  cases += 6;
+
+  /* ★ 尺寸变化必须被识别为变化。
+     v4.9.6 初版这里用 [s.x,s.y,s.w,s.h,…].join('|')，而签章对象的字段是 **width/height**：
+     s.w/s.h 恒 undefined → 两侧 key 都是 'undefined' → 改完尺寸撤销**不发 stampchange**，
+     宿主副本停在旧尺寸（与 D6 同一类静默漂移，只是换了入口）。 */
+  events.length = 0;
+  const target = inst._stamps.find(function (s) { return s.id === s2.id; });
+  const w0 = target.width;
+  target.width = w0 + 180;                  // 模拟拖拽放大
+  inst._pushHistory();
+  events.length = 0;
+  inst.undo();
+  assert.strictEqual(only('stampchange').length, 1, '改尺寸后撤销必须发 stampchange');
+  assert.strictEqual(only('stampchange')[0].payload.width, w0, 'payload 带回撤销后的宽度（旧值）');
+  cases += 2;
+
+  /* 纯函数层面的钉子：字段并集比较（不依赖手写清单） */
+  const same = Picker._internals.sameStamp;
+  assert.strictEqual(same({ width: 1 }, { width: 2 }), false, 'sameStamp 认 width 变化');
+  assert.strictEqual(same({ height: 1 }, { height: 2 }), false, 'sameStamp 认 height 变化');
+  assert.strictEqual(same({ x: 1, width: 2 }, { x: 1, width: 2 }), true, 'sameStamp 同值判等');
+  assert.strictEqual(same({ image: { src: 'a' } }, { image: { src: 'b' } }), false, 'sameStamp 比 image.src');
+  assert.strictEqual(same({ image: { src: 'a' } }, { image: { src: 'a' } }), true, 'sameStamp image 同 src 判等');
+  cases += 5;
+}
+
+/* 12. 用户变更进历史（D1 根治）：removeUser 后撤销不能产生【孤儿签章】
+   旧实现 removeUser 改 _stamps/_users 却不入历史 → undo 复活已删用户的签章：
+   toFlatJSON 保留（user:null）、toJSON 分组时丢弃 → 同一状态两个导出器**差 1 条**（静默丢数据）。 */
+{
+  const inst = mkInst(50);
+  inst._users = [{ id: 'u1', name: 'U1' }, { id: 'u2', name: 'U2' }];
+  inst._currentUserId = 'u2';
+  inst._emit = function () {};
+  const a = inst.addStamp({ x: 10, y: 10, userId: 'u1' });
+  inst._currentUserId = 'u1';                     // 库禁止移除"当前用户"，先把当前用户切到 u1
+  const b = inst.addStamp({ x: 60, y: 60, userId: 'u2' });
+
+  inst.removeUser('u2');
+  assert.strictEqual(inst._stamps.length, 1, '删除用户后其签章一并移除');
+  inst.undo();                                   // 旧实现：此处复活 b 但不复活 u2 → 孤儿
+  assert.ok(inst._users.some(function (u) { return u.id === 'u2'; }), '撤销必须把用户一并还原');
+  const orphans = inst._stamps.filter(function (s) { return s.userId && !inst._users.some(function (u) { return u.id === s.userId; }); });
+  assert.strictEqual(orphans.length, 0, '撤销后不允许存在孤儿签章（userId 不在用户列表里）');
+  assert.strictEqual(inst._stamps.length, 2, '撤销回到两枚签章');
+  const json = Picker._internals.buildJSON({}, inst._stamps, inst._users);
+  const grouped = json.users.reduce(function (n, g) { return n + (g.stamps ? g.stamps.length : 0); }, 0);
+  assert.strictEqual(grouped, inst._stamps.length, '分组导出条数必须等于内部状态条数（无静默丢失）');
+  assert.strictEqual(inst._stamps.filter(function (s) { return s.id === a.id; }).length, 1, 'u1 的签章仍在');
+  cases += 5;
+}
+
+
 console.log('=== 历史分组单测通过：' + cases + ' 项断言'
   + '（不分组语义 / 一次按住=一步 / 两次按住=两步 / 60 次变更不冲爆 / 跨 key 不合并 /'
-  + ' undo 与 redo 分支失效 / 重置清理 / 分组不影响实时状态 / 快照隔离）===');
+  + ' undo 与 redo 分支失效 / 重置清理 / 分组不影响实时状态 / 快照隔离 /'
+  + ' 撤销重做增量事件 D6 / 用户变更进历史 D1）===');

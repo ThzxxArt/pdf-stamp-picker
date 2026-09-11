@@ -6,8 +6,8 @@
 <title>历史分组（交互级合并）回归测试 …</title>
 <link rel="stylesheet" href="../vendor/pdf.min.css">
 <script src="../vendor/pdf.min.js"></script>
-<script src="test-harness.js?v=4.9.5"></script>
-<script src="../pdf-stamp-picker.js?v=4.9.5"></script>
+<script src="test-harness.js?v=4.9.6"></script>
+<script src="../pdf-stamp-picker.js?v=4.9.6"></script>
 <style>
   body { font: 13px/1.6 -apple-system, "PingFang SC", sans-serif; margin: 12px; color: #222; }
   h1 { font-size: 15px; }
@@ -270,13 +270,13 @@
       var l = await mkLoaded({});
       l.p.selectStamp(l.stamp.id);
       hold(l.p, 'ArrowLeft', 4, false);
-      var topX = l.p._history[l.p._history.length - 1][0].x;
+      var topX = l.p._history[l.p._history.length - 1].stamps[0].x;   // 条目结构 { stamps, users }
       var liveX = l.p.getStamps()[0].x;
       rec('历史栈顶快照与实时状态一致',
         topX === liveX, 'snapshot.x=' + topX + ' live.x=' + liveX);
       // 再改一次（新分组）后，上一条历史必须保持原值
       hold(l.p, 'ArrowLeft', 4, false);
-      var prevX = l.p._history[l.p._history.length - 2][0].x;
+      var prevX = l.p._history[l.p._history.length - 2].stamps[0].x;
       rec('新交互不会篡改上一条历史（快照隔离）',
         prevX === topX, 'prev=' + prevX + ' 期望 ' + topX);
       l.p.destroy(); l.host.remove();

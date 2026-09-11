@@ -577,7 +577,7 @@ new PdfStampPicker('#stage', { toolbar: false });
 | `import` | JSON 导入完成 | `{count, users, skipped}`（`skipped` = 被跳过的坏条目数） |
 | `hashready` | PDF 哈希就绪（含纯 URL 后台补算完成） | `{hash, hashAlgorithm}` |
 | `overlap` | 签章点重叠检测 | `{stamp, overlaps:[{id,userId,name}]}` |
-| `error` | 加载/运行错误（含程序化 `load()` 失败、导入部分失败） | `{error, message, stage}`（`stage`: `prepare`/`read`/`hash`/`fetch`/`parse`/`timeout`/`import`/`compat`…） |
+| `error` | 加载/运行错误（含程序化 `load()` 失败、导入部分失败）。**同一次失败只派发一次**（v4.9.6 起按错误对象去重） | `{error, message, stage}`。stage 为**封闭集合**（v4.9.6 起，不在集合内一律归 `unknown`）：`prepare` / `read` / `hash` / `fetch` / `parse` / `ready` / `done` / `compat` / `type` / `source` / `timeout` / `import` / `load` / `stampimage` / `unknown`。含义见 [INTEGRATION 12.14](INTEGRATION.md#1214-errorstage-取值封闭集合v496-起) |
 
 ---
 

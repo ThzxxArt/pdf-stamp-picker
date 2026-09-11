@@ -1,4 +1,4 @@
-// TypeScript declarations for PdfStampPicker v2.0.0
+// TypeScript declarations for PdfStampPicker v4.9.6
 
 export type PickerMode = 'point' | 'rect' | 'stamp';
 export type PickerZoom = number | 'fit-width' | 'fit-page';
@@ -111,6 +111,20 @@ export type PdfSource =
   | { url: string; method?: string; headers?: Record<string, string>; body?: BodyInit }
   | { getPage: Function; numPages: number };
 
+/** load()/loadPDF() 的第二个参数（对 string 与 {url} 两种 source 形式均生效） */
+export interface LoadOptions {
+  pageNumber?: number;
+  mode?: PickerMode;
+  signal?: AbortSignal;
+  /** 请求头，如 { Authorization: 'Bearer x' } */
+  headers?: Record<string, string>;
+  method?: string;
+  body?: BodyInit;
+  credentials?: 'omit' | 'same-origin' | 'include';
+  cache?: string;
+  referrerPolicy?: string;
+}
+
 export interface StampJSON {
   id: string;
   page: number;
@@ -190,9 +204,9 @@ export default class PdfStampPicker {
   static version: string;
 
   /** 统一加载：File / ArrayBuffer / URL / 流接口配置 / pdfjs proxy */
-  load(source: PdfSource, opts?: { pageNumber?: number; mode?: PickerMode; signal?: AbortSignal }): Promise<void>;
-  /** 兼容 v1 的 PDF.js 集成模式 */
-  loadPDF(source: PdfSource, opts?: { pageNumber?: number }): Promise<void>;
+  load(source: PdfSource, opts?: LoadOptions): Promise<void>;
+  /** load() 的兼容别名（等价于 load，不是独立的 v1 集成模式） */
+  loadPDF(source: PdfSource, opts?: LoadOptions): Promise<void>;
   /**
    * 中止当前加载（在途请求 + 后续渲染/哈希链）。
    * 进行中的 load() 会以 name==='AbortError' 结束（预期行为，不派发 error 事件）。

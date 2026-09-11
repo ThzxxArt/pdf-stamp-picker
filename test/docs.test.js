@@ -19,6 +19,10 @@
  *   7. README 测试段：表格页集合 == run-all 的 SUITE，各页条数 == 该页 __TEST.expect()，
  *      套件数/总条数 == 实际值（总条数含 run-all 的 AGGREGATE_ASSERTIONS）
  *   8. 测试页自身响应式：全部 demo 页都有 viewport meta；harness 的窄视口样式限定在媒体查询内
+ *   9. 构造选项 JSDoc：源码 defaults 的**每个键**都在构造器 JSDoc 里有 `@param options.X`，
+ *      且 JSDoc 里不出现不存在的选项（双向）—— 此前 30 个默认项有 17 个完全没写
+ *  10. error.stage 封闭集合：VALID_STAGES == 代码内所有 stage 字面量（_fail 第 2 参 / _loadStage 赋值）
+ *      == README 事件表列出的取值 == INTEGRATION 列出的取值（三方，防"文档漏列可用取值"）
  *
  * ★ 两侧数据必须**来源不同**：一边读源码（grep prototype/emit），一边解析 Markdown 表格。
  *   若两边都从库内部读数（如断言 f() === f()）则永不可能失败 —— 等于没测。
@@ -50,6 +54,18 @@ check('库内 VERSION 存在', !!srcVersion, srcVersion);
 check('package.json 与库内 VERSION 一致', PKG.version === srcVersion, PKG.version + ' vs ' + srcVersion);
 check('模块导出 version 与库内 VERSION 一致',
   SRC.includes('PdfStampPicker.version = VERSION'), 'PdfStampPicker.version = VERSION');
+
+/* 版本戳不止 VERSION 常量一处 —— 还有**两处纯注释/文档头**，历史上长期无人查：
+   实测 v4.9.5 时 库头写 `PdfStampPicker v4.9.4`、d.ts 头写 `v2.0.0`，三处各不相同，
+   而本节只查 ?v= / package.json / VERSION / demo 页 title，全部放行。
+   后果：使用者 `head -1 pdf-stamp-picker.d.ts` 判断手上是什么版本，直接读到错值。
+   凡是"能被人读到的版本声明"都必须纳入对账，不只是机器读的那几处。 */
+const libHeadVer = /^\s*\*?\s*PdfStampPicker v([\d.]+)/m.exec(SRC.slice(0, 2000));
+check('库头注释版本 == 库内 VERSION', !!libHeadVer && libHeadVer[1] === srcVersion,
+  libHeadVer ? '库头 v' + libHeadVer[1] + ' vs VERSION ' + srcVersion : '未找到库头「PdfStampPicker vX.Y.Z」');
+const dtsHeadVer = /^\/\/ TypeScript declarations for PdfStampPicker v([\d.]+)/m.exec(DTS);
+check('d.ts 头部版本 == 库内 VERSION', !!dtsHeadVer && dtsHeadVer[1] === srcVersion,
+  dtsHeadVer ? 'd.ts v' + dtsHeadVer[1] + ' vs VERSION ' + srcVersion : '未找到 d.ts 头部「vX.Y.Z」');
 
 const stampRe = /pdf-stamp-picker\.js\?v=([\w.\-]+)/g;
 const demoStamps = new Set();
@@ -518,6 +534,108 @@ check('派发指针事件的套件都过了布局就绪门禁（自检 ≥4 页�
   pointerPages.length >= 4 && noGate.length === 0,
   noGate.length ? '缺门禁：' + noGate.join(', ') : pointerPages.length + ' 页已检查');
 check('harness 导出 waitForLayout 门禁原语', /waitForLayout:\s*function/.test(harness));
+
+/* ---------- 9. 构造选项 JSDoc ↔ 源码默认值（双向） ----------
+   背景（M6）：构造器 JSDoc 只写了 13 个 @param，而 defaults 有 30 个键 ——
+   `stampSize`（v4.9.4 的单位变更主角）、`loadTimeout`、`keepBytes`、`hashUrl`、
+   `credentials`/`cache`/`referrerPolicy` 等**全都没写**。宿主只能去读源码。
+   文档缺项靠人回想是补不回来的：因此把"默认值 ⇄ JSDoc"变成断言。
+   ★ 两侧来源不同：一边解析源码里 Object.assign 的字面量键，一边解析注释里的 @param。 */
+section('9. 构造选项 JSDoc 与源码默认值对账');
+const optDocBlock = (() => {
+  const i = SRC.indexOf('@param {HTMLElement|string} container');
+  if (i < 0) return '';
+  const start = SRC.lastIndexOf('/**', i);
+  const end = SRC.indexOf('*/', i);
+  return SRC.slice(start, end);
+})();
+const jsdocOptions = new Set();
+{
+  const re = /@param\s+\{(?:[^{}]|\{[^{}]*\})*\}\s+\[?options\.([A-Za-z_$][\w$]*)/g;
+  let mm;
+  while ((mm = re.exec(optDocBlock)) !== null) jsdocOptions.add(mm[1]);
+}
+check('构造选项 JSDoc 可解析（自检 ≥25 项）', jsdocOptions.size >= 25, jsdocOptions.size + ' 项');
+
+const defaultsBlock = (() => {
+  const i = SRC.indexOf('this._options = Object.assign({');
+  if (i < 0) return '';
+  const end = SRC.indexOf('}, options || {})', i);
+  return SRC.slice(i, end);
+})();
+const defaultValueKeys = new Set();
+{
+  const re = /^\s*([A-Za-z_$][\w$]*)\s*:/gm;
+  let mm;
+  while ((mm = re.exec(defaultsBlock)) !== null) defaultValueKeys.add(mm[1]);
+}
+check('源码默认值可解析（自检 ≥25 项）', defaultValueKeys.size >= 25, defaultValueKeys.size + ' 项');
+
+/* pdfjs 是"值而非默认项"（传入已有实例），允许 JSDoc 有、defaults 无 */
+const JSDOC_ONLY_OK = new Set(['pdfjs']);
+const undoc = [...defaultValueKeys].filter(k => !jsdocOptions.has(k));
+check('每个默认选项都写进了构造器 JSDoc', undoc.length === 0,
+  undoc.length ? '未写：' + undoc.join(', ') : defaultValueKeys.size + ' 个默认项已全数覆盖');
+const phantom = [...jsdocOptions].filter(k => !defaultValueKeys.has(k) && !JSDOC_ONLY_OK.has(k));
+check('构造器 JSDoc 没有臆造的选项', phantom.length === 0, phantom.join(', ') || '（无）');
+
+/* ---------- 10. error.stage 封闭集合（代码 ↔ README ↔ INTEGRATION） ----------
+   背景（M7）：文档只列了 8 个 stage，代码实际可产出 15 个（漏 type/source/load/unknown…），
+   宿主按文档 switch 就会漏分支。这里三方对账，另外还查**代码里的字面量**：
+   _fail(err,'xxx') 的第 2 参与 _loadStage='xxx' 必须都在 VALID_STAGES 里 ——
+   否则拼错会被 _fail 静默收敛成 'unknown'，文档永远对得上而 bug 已经上线。 */
+section('10. error.stage 封闭集合三方对账');
+const stageListBlock = SRC.slice(SRC.indexOf('var VALID_STAGES = ['), SRC.indexOf('];', SRC.indexOf('var VALID_STAGES = [')));
+const validStages = [...stageListBlock.matchAll(/'([a-z0-9_]+)'/g)].map(x => x[1]);
+check('VALID_STAGES 可解析（自检 ≥10 项）', validStages.length >= 10, validStages.length + ' 项');
+check('VALID_STAGES 无重复项', new Set(validStages).size === validStages.length);
+
+/* 10a. 代码内字面量：_fail(x, 'stage') 的第 2 参 + _loadStage = 'stage' */
+function lastStringArgOfCalls(src, fnName) {
+  const out = [];
+  const re = new RegExp(fnName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\(', 'g');
+  let mm;
+  while ((mm = re.exec(src)) !== null) {
+    let i = mm.index + mm[0].length - 1, depth = 0, j = i;
+    for (; j < src.length; j++) {
+      if (src[j] === '(') depth++;
+      else if (src[j] === ')') { depth--; if (depth === 0) break; }
+    }
+    const call = src.slice(i, j + 1);
+    const lits = [...call.matchAll(/'([a-z0-9_]{3,12})'/g)].map(x => x[1]);
+    if (lits.length) out.push(lits[lits.length - 1]);
+  }
+  return out;
+}
+const failStages = lastStringArgOfCalls(SRC, '_fail');
+check('_fail 第 2 参 stage 字面量可解析（自检 ≥3 处）', failStages.length >= 3, failStages.join(', '));
+const loadStageLits = [...SRC.matchAll(/_loadStage\s*=\s*'([a-z0-9_]+)'/g)].map(x => x[1]);
+check('_loadStage 赋值字面量可解析（自检 ≥3 处）', loadStageLits.length >= 3, loadStageLits.join(', '));
+const badStageLits = [...new Set([...failStages, ...loadStageLits])].filter(s => validStages.indexOf(s) < 0);
+check('代码里的 stage 字面量都在 VALID_STAGES 内（防拼错被静默收敛成 unknown）',
+  badStageLits.length === 0, badStageLits.join(', ') || (failStages.length + loadStageLits.length) + ' 处字面量已检查');
+
+/* 10b. README 事件表的 error 行必须列全 */
+const readmeStageRow = README.split('\n').find(l => /^\|\s*`error`\s*\|/.test(l)) || '';
+const readmeStages = [...readmeStageRow.matchAll(/`([a-z0-9_]+)`/g)].map(x => x[1]).filter(s => s !== 'error');
+check('README error 行 stage 取值可解析（自检 ≥10 项）', readmeStages.length >= 10, readmeStages.length + ' 项');
+const missInReadmeStages = validStages.filter(s => readmeStages.indexOf(s) < 0);
+check('README 列全了全部 stage 取值', missInReadmeStages.length === 0,
+  missInReadmeStages.length ? '漏：' + missInReadmeStages.join(', ') : validStages.length + ' 个取值已覆盖');
+const extraInReadmeStages = readmeStages.filter(s => validStages.indexOf(s) < 0);
+check('README 没有列出不存在的 stage', extraInReadmeStages.length === 0, extraInReadmeStages.join(', ') || '（无）');
+
+/* 10c. INTEGRATION 同样要有完整清单（宿主接的是它，不是 README） */
+const integrationStageSection = (() => {
+  const i = INTEGRATION.indexOf('error.stage');
+  if (i < 0) return '';
+  return INTEGRATION.slice(i, i + 2000);
+})();
+const integrationStages = [...integrationStageSection.matchAll(/`([a-z0-9_]+)`/g)].map(x => x[1]);
+check('INTEGRATION error.stage 清单可解析（自检 ≥10 项）', integrationStages.length >= 10, integrationStages.length + ' 项');
+const missInIntStages = validStages.filter(s => integrationStages.indexOf(s) < 0);
+check('INTEGRATION 列全了全部 stage 取值', missInIntStages.length === 0,
+  missInIntStages.length ? '漏：' + missInIntStages.join(', ') : validStages.length + ' 个取值已覆盖');
 
 /* ---------- 汇总 ---------- */
 console.log('\n=== 文档一致性：' + passed + '/' + (passed + failed) + ' 通过 ===');

@@ -556,10 +556,10 @@ await picker.load(file)
 
 | 方法 | 说明 |
 |---|---|
-| `load(source, opts?)` | 加载文档。`source` 支持：URL 字符串 / `File` / `ArrayBuffer` / `{url, method, headers, body}` 流接口 / pdfjs document proxy。`opts.pageNumber` 指定初始页，`opts.mode` 覆盖模式，`opts.signal` 传入 `AbortSignal` 可中止 |
+| `load(source, opts?)` | 加载文档。`source` 支持：URL 字符串 / `File` / `ArrayBuffer` / `{url, method, headers, body}` 流接口 / pdfjs document proxy。`opts.pageNumber` 指定初始页，`opts.mode` 覆盖模式，`opts.signal` 传入 `AbortSignal` 可中止。**URL 字符串形式也能带请求头**：`load(url, { headers: { Authorization: 'Bearer x' } })` 与 `load({ url, headers })` 等价（受保护接口请用这两种写法，别只传裸 URL） |
 | `abort()` | 中止在途加载（请求 + 后续渲染），进行中的 `load()` 以 `AbortError` reject。对**已加载完成**的实例是空操作 |
-| `destroy()` | 销毁实例：解绑事件、清理 DOM、中止在途任务。销毁后所有方法均为空操作 |
-| `loadPDF(source, opts?)` | 兼容 v1：直接传入已取得的 pdfjs document proxy（跳过后端加载流程） |
+| `destroy()` | 销毁实例：解绑事件、清理 DOM、中止在途任务。**销毁后所有公开方法一律空操作**（不抛错、不改状态）—— 返回类型保持原形状：链式方法返回 `this`，`importJSON`/`exportImage` 返回**已 resolve** 的 Promise（`exportImage` 解析为 `null`，**不会 reject**，卸载流程里调用不会产生未处理拒绝）。该契约由 `test/destroy.test.js` 对 46 个公开方法逐一断言（`_destroySafe` 归类表双向对账） |
+| `loadPDF(source, opts?)` | **`load()` 的纯别名**（兼容 v1 旧名）：参数与行为完全等同于 `load()`，可以传任意来源（URL / File / 字节 / 流接口）。**注意**：它并不"跳过加载流程"、也不专收 document proxy —— 那种旧说法是错的（proxy 同样交给 `load()` 处理） |
 | `setPage(meta)` | 纯画布模式（兼容 v1）：宿主自行渲染 canvas，库只负责坐标选择与签章层 |
 | `gotoPage(n)` | 跳转到第 n 页（会 clamp 到 `[1, getTotalPages()]`） |
 
@@ -624,7 +624,7 @@ await picker.load(file)
 |---|---|
 | `toJSON(opts?)` | 分组 JSON（`users[].stamps[]`）。`opts.includeImage` 决定是否内嵌章图 |
 | `toFlatJSON(opts?)` | 扁平 JSON（顶层 `stamps[]`），便于直接遍历 |
-| `importJSON(json, opts?)` | 导入 JSON，支持分组 / 扁平 / `users[]` 声明式三种写法；返回 `Promise` |
+| `importJSON(json, opts?)` | 导入 JSON，支持分组 / 扁平 / `users[]` 声明式三种写法；返回 `Promise`。**每个成功导入的签章点都会派发一次 `stampadd`**（payload 为该签章对象，含 `id`/`userId`/坐标），`opts.replace !== false` 时先清空再导入；部分条目非法时**已导入的部分保留**，并 reject 一个 `stage:'import'` 的错误（错误对象上带坏条目计数） |
 | `copyJSON()` | 复制当前 JSON 到剪贴板 |
 
 ### 12.9 签章增删与选中
@@ -642,8 +642,8 @@ await picker.load(file)
 
 | 方法 | 说明 |
 |---|---|
-| `undo()` | 撤销一步 |
-| `redo()` | 重做一步 |
+| `undo()` | 撤销一步。**会派发增量事件**（v4.9.6 起）：按"撤销导致的真实差异"发 `stampadd` / `stampremove` / `stampchange`，最后统一发一次 `change` —— 宿主维护增量副本不会漂移；旧版只发 `stampchange(null)`，宿主无法从 payload 判断发生了什么 |
+| `redo()` | 重做一步。事件语义与 `undo()` 对称 |
 | `beginHistoryGroup(key)` | 开启交互分组：同 `key` 期间的高频变更**覆盖栈顶**而非新增条目（长按方向键、拖拽改尺寸） |
 | `endHistoryGroup()` | 结束分组；也会由 `keyup` / `pointerup` / `blur` / `destroy` 自动结束 |
 
@@ -660,14 +660,14 @@ await picker.load(file)
 | `PdfStampPicker.openModal(config)` | 打开弹窗版选择器 |
 | `PdfStampPicker.loadPdfJs(opts)` | 从指定 URL 加载 pdf.js |
 | `PdfStampPicker.loadPdfJsAuto(opts)` | **本地优先、CDN 兜底**加载 pdf.js（含 fetch + Blob 兜底，绕开内网 strict MIME） |
-| `PdfStampPicker.version` | 版本号字符串（如 `'4.9.5'`） |
+| `PdfStampPicker.version` | 版本号字符串（如 `'4.9.6'`） |
 
 ### 12.13 事件清单
 
 | 事件 | 触发时机 |
 |---|---|
 | `ready` | 文档加载完成、首屏渲染就绪 |
-| `error` | 加载或渲染失败（payload 含错误对象） |
+| `error` | 加载或渲染失败（payload `{error, message, stage}`）。**同一次失败只派发一次**（v4.9.6 起：多层层层上报会按错误对象去重，宿主不会收到形状不一致的重复事件）。`stage` 取值见 12.14 |
 | `pagechange` | 当前页变化 |
 | `zoomchange` | 缩放或 fit 结果变化 |
 | `change` | 任何签章数据变更（增删改、导入、清空都会发） |
@@ -682,6 +682,32 @@ await picker.load(file)
 | `hashready` | 文档 SHA-256 异步补算完成 |
 | `import` | `importJSON` 完成（payload 含坏条目计数） |
 
+### 12.14 `error.stage` 取值（封闭集合，v4.9.6 起）
+
+`error` 事件的 `payload.stage` 用来说明**失败发生在哪一步**，便于宿主做差异化提示。取值为**封闭集合**，全部 15 个取值如下：
+
+`prepare` / `read` / `hash` / `fetch` / `parse` / `ready` / `done` / `compat` / `type` / `source` / `timeout` / `import` / `load` / `stampimage` / `unknown`
+
+不在集合内的取值会被统一收敛为 `unknown`（拼错不会产生文档外取值），集合本身由 `test/docs.test.js` 与源码 + README 三方对账。
+
+| stage | 含义 |
+|---|---|
+| **prepare** | 开始加载、准备参数 |
+| **read** | 读取本地 File / ArrayBuffer |
+| **hash** | 计算文档 SHA-256 |
+| **fetch** | 下载 PDF 字节 |
+| **parse** | 交给 pdf.js 解析文档 |
+| **ready** | 解析完成后的就绪阶段（初始化视图等） |
+| **done** | 加载收尾阶段 |
+| **compat** | 旧浏览器兼容检测未通过（`compatCheck: true` 时） |
+| **type** | 来源类型/内容校验失败（如非 PDF 文件） |
+| **source** | 无法识别的 PDF 来源 |
+| **timeout** | 超过 `loadTimeout` |
+| **import** | `importJSON` 部分条目失败 |
+| **load** | 加载链兜底（发生在上面具体阶段之外的失败） |
+| **stampimage** | 公章图加载失败（如 `stampImage.src` 不可达） |
+| **unknown** | 未归类（含库内部未预期的阶段） |
+
 ---
 
 ## 13. 版本与兼容
@@ -691,4 +717,4 @@ await picker.load(file)
 - **worker fetch + Blob 加载对所有浏览器生效**（v4.8.24 起）：不仅旧内核，现代浏览器的 `new Worker()` 也会因内网 `nosniff`/错误 MIME 被拒，故 worker 统一 fetch 源码 → Blob URL 绕开 strict MIME checking。**前提：内网 `vendor/` 三文件（pdf.min.js + pdf.worker.min.js + cMaps/）必须 HTTP 200 可达**
 - 无任何运行时依赖；pdf.js 3.11.174（内置本地可换）
 - 坐标：PDF 原生 pt、原点左下、自动补偿页面旋转——对接任何签章服务前先对齐坐标约定（README 有换算公式）
-- 当前版本 v4.9.5：默认签章模式 · JSON 分组输出/含图导出（`includeImage`）/导入反显（`importJSON` / 弹窗传 `json`）· `document.hash`（SHA-256 文件指纹）· 撤销重做（含**交互分组** `beginHistoryGroup`）· 多签署方动态管理 · 章固定大小 + 边界间距（`stampMargin`）· 工具栏按钮可配置（`toolbar`）· 弹窗校验（`requireStamp` / `requireAllUsers`）· 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线 · **旧浏览器自动兼容（compatCheck 默认 false，polyfill 兜底 Edge 90 可用）** · **内网严格 MIME 自动兜底（pdf.min.js + worker 均 fetch+Blob，v4.8.24）** · **签章尺寸单位为 PDF pt（v4.9.4：`stampSize` 与画布点击放置完全一致，不随窗口宽度/缩放漂移）** · **窄容器自动堆叠（v4.9.5：容器宽度 < 620px 时签章列表移到画布下方，画布不再被 248px 侧栏挤瘪）**
+- 当前版本 v4.9.6：默认签章模式 · JSON 分组输出/含图导出（`includeImage`）/导入反显（`importJSON` / 弹窗传 `json`）· `document.hash`（SHA-256 文件指纹）· 撤销重做（含**交互分组** `beginHistoryGroup`）· 多签署方动态管理 · 章固定大小 + 边界间距（`stampMargin`）· 工具栏按钮可配置（`toolbar`）· 弹窗校验（`requireStamp` / `requireAllUsers`）· 统一加载（File/URL/流接口/字节/代理 + 进度/中止）· cMaps 中文离线 · **旧浏览器自动兼容（compatCheck 默认 false，polyfill 兜底 Edge 90 可用）** · **内网严格 MIME 自动兜底（pdf.min.js + worker 均 fetch+Blob，v4.8.24）** · **签章尺寸单位为 PDF pt（v4.9.4：`stampSize` 与画布点击放置完全一致，不随窗口宽度/缩放漂移）** · **窄容器自动堆叠（v4.9.5：容器宽度 < 620px 时签章列表移到画布下方，画布不再被 248px 侧栏挤瘪）** · **v4.9.6 缺陷根治批次：撤销/重做改为派发真实增量事件（宿主副本不漂移）· 同一次失败只派发一次 `error` · `error.stage` 收敛为封闭集合 · 动态删用户进历史 · 加载失败不再产生未捕获 Promise 拒绝 + `_lastError` 可读 · `pickerOptions.users/currentUser` 不再被静默覆盖 · 导入路径 payload 与程序化路径同形 · cMaps 与探测到的 pdf.min.js 同目录 · destroy 后全部方法空操作（含返回 Promise 的）· 库头/d.ts 版本戳纳入机器对账**
