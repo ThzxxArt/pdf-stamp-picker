@@ -67,10 +67,14 @@
 </script>
 ```
 
-**方式二：npm**
+**方式二：npm（从 GitHub 仓库安装）**
+
+> 本项目**暂未发布到 npm registry**，请通过 GitHub 仓库直接安装。包名取自 `package.json`，因此下面的引入路径不变。
 
 ```bash
-npm install pdf-stamp-picker
+npm install github:ThzxxArt/pdf-stamp-picker
+# 或
+npm install git+https://github.com/ThzxxArt/pdf-stamp-picker.git
 ```
 
 ```js

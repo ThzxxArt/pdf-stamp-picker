@@ -6,12 +6,12 @@
 
 ### 方式 A：npm / git 依赖（推荐）
 
-```bash
-# 直接装 git 仓库（当前托管在 MetonaTeam）
-npm install git+https://git.metona.cn/MetonaTeam/pdf-stamp-picker.git
+> 暂未发布到 npm registry，通过 GitHub 仓库安装（包名取自 `package.json`，引入路径不变）。
 
-# 或发布私有 npm 包后
-npm install pdf-stamp-picker
+```bash
+npm install github:ThzxxArt/pdf-stamp-picker
+# 或
+npm install git+https://github.com/ThzxxArt/pdf-stamp-picker.git
 ```
 
 ### 方式 B：script 标签（传统页面）
@@ -174,7 +174,7 @@ angular.module('myApp', []).directive('pdfStampPicker', function () {
 ### 4.1 安装
 
 ```bash
-npm install git+https://git.metona.cn/MetonaTeam/pdf-stamp-picker.git
+npm install github:ThzxxArt/pdf-stamp-picker
 # 或拷贝 pdf-stamp-picker.js 到项目静态目录
 ```
 
@@ -284,7 +284,7 @@ function handleSign(json) {
 ### 5.1 安装
 
 ```bash
-npm install git+https://git.metona.cn/MetonaTeam/pdf-stamp-picker.git
+npm install github:ThzxxArt/pdf-stamp-picker
 # 或 <script src="pdf-stamp-picker.js"> 引入（UMD 全局变量）
 ```
 
@@ -366,7 +366,7 @@ export default {
 ### 5.1 安装
 
 ```bash
-npm install git+https://git.metona.cn/MetonaTeam/pdf-stamp-picker.git
+npm install github:ThzxxArt/pdf-stamp-picker
 ```
 
 ### 5.2 组件方式
