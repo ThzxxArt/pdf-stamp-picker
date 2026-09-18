@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """生成带中文 CID 字体(GBK编码)的 PDF，验证 cMaps 本地化后中文不乱码。
 用 pdf.js 官方测试用的 CID 字体描述(不嵌入字体文件，用系统字体替代渲染)。"""
+import os
 import zlib
 
 # 简单方法：构造一个用 Type0/GBK 编码的中文文本 PDF
@@ -71,5 +72,6 @@ for off in offsets[1:]:
 out.append(b'trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%d\n%%%%EOF\n' % (len(objs)+1, catalog, xref))
 
 data = b''.join(out)
-open('/var/minis/workspace/pdf-stamp-picker/demo/chinese-cid.pdf', 'wb').write(data)
+out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'chinese-cid.pdf')
+open(out_path, 'wb').write(data)
 print('chinese-cid.pdf 生成:', len(data), 'bytes (GBK CID 中文)')

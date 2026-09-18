@@ -4,7 +4,7 @@
 # → 验证库 fetch+Blob 兜底仍能加载 pdf.js
 import http.server, os, urllib.parse
 
-ROOT = '/var/minis/workspace'
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PORT = 8897
 
 class H(http.server.SimpleHTTPRequestHandler):

@@ -9,7 +9,7 @@
   不再承担缓存失效的职责，从此不可能踩到。
 
 用法：python3 test/devserver.py [port] [root]
-默认：8899 端口，根目录 = 仓库的上一级（即 /var/minis/workspace，与既有测试 URL 对齐）
+默认：8899 端口，根目录 = 仓库的上一级（即包含 pdf-stamp-picker 目录的那一级，与既有测试 URL 对齐）
 """
 import os
 import sys

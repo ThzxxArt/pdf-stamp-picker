@@ -1,10 +1,11 @@
 // v4 单元测试：JSON 按用户分组结构 / 多用户多签章归属 / 扁平版兼容 / 旋转归一化 / 本地候选探测
 const assert = require('assert');
-const PdfStampPickerModule = require('/var/minis/workspace/pdf-stamp-picker/pdf-stamp-picker.js');
+const path = require('path');
+const PdfStampPickerModule = require(path.join(__dirname, '..', 'pdf-stamp-picker.js'));
 const { _internals, version } = PdfStampPickerModule;
 
 // 版本号不写字面量：以 package.json 为唯一真源（历史上硬编码导致每次发版都要手工同步多处）
-assert.strictEqual(version, require('/var/minis/workspace/pdf-stamp-picker/package.json').version);
+assert.strictEqual(version, require(path.join(__dirname, '..', 'package.json')).version);
 
 const { buildJSON, buildFlatJSON, genId, normalizeRotation } = _internals;
 
